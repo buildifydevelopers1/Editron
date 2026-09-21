@@ -15,8 +15,7 @@ import {
   Zap,
   Play
 } from 'lucide-react';
-import { AutonomousDirectorResult, requestAutonomousDirectorLoop } from '../../services/api';
-import { resolveAssetUrl } from '../../utils/assetUrl';
+import { AutonomousDirectorResult, requestAutonomousDirectorLoop, resolveAssetUrl } from '../../services/api';
 
 interface AutonomousDirectorModalProps {
   isOpen: boolean;

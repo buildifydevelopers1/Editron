@@ -2,6 +2,7 @@ import {
   AppConfig,
   AttitudeReelPlan,
   ColorGradingSettings,
+  SubtitleStyle,
   SubtitleWord,
   TrendingSong,
   UploadedMedia,
