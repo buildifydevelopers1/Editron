@@ -161,3 +161,4 @@ export class TrendingAudioService {
 
     return matches;
   }
+}
