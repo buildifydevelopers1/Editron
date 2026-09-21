@@ -1,0 +1,33 @@
+# ==============================================================================
+# Render Blueprint Specification (render.yaml)
+# https://render.com/docs/blueprint-spec
+# ==============================================================================
+
+services:
+  - type: web
+    name: editron-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter # Starter or standard recommended for video rendering
+    region: oregon # Or frankfurt, ohio, singapore
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: GROQ_API_KEY
+        sync: false # Set securely in Render dashboard
+      - key: GROQ_LLM_MODEL
+        value: gpt-oss-120b
+      - key: GROQ_WHISPER_MODEL
+        value: whisper-large-v3
+      - key: GROQ_VISION_MODEL
+        value: llama-3.2-11b-vision-preview
+      - key: GROQ_BASE_URL
+        value: https://api.groq.com/openai/v1
+    disk:
+      name: editron-storage
+      mountPath: /app/server/uploads
+      sizeGB: 10

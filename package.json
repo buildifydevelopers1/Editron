@@ -1,0 +1,27 @@
+{
+  "name": "editron",
+  "version": "1.0.0",
+  "description": "Editron - DaVinci Resolve Inspired Professional AI Video Editor",
+  "scripts": {
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
+    "dev:server": "node server/index.js",
+    "dev:client": "cd client && npm run dev",
+    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"cyan,magenta\" \"npm run dev:server\" \"npm run dev:client\"",
+    "build:client": "cd client && npm run build",
+    "start": "node server/index.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "keywords": [
+    "ai-video-editor",
+    "davinci-resolve",
+    "groq",
+    "whisper",
+    "gpt-oss-120b",
+    "ffmpeg",
+    "video-editing"
+  ],
+  "author": "Editron Team",
+  "license": "MIT"
+}
