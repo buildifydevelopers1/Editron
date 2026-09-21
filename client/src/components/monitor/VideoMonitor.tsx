@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Play,
   Pause,
@@ -351,13 +351,68 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
   extraFilters += transExtraFilter;
   const videoFilterStyle = `contrast(${contrast}) saturate(${saturation}) brightness(${brightness}) sepia(${sepia}) hue-rotate(${hueRotate}deg)${extraFilters}`;
 
-  // Find active subtitle words at current time
-  const currentWords = subtitles.filter(
-    (w) => currentTime >= w.start - 0.1 && currentTime <= w.end + 0.3
+  // Group consecutive words into natural reading phrases (e.g. 3-5 words per phrase, or max 2.6s duration)
+  const subtitlePhrases = useMemo(() => {
+    if (!subtitles || subtitles.length === 0) return [];
+    const phrases: {
+      id: string;
+      start: number;
+      end: number;
+      words: SubtitleWord[];
+    }[] = [];
+
+    let currentPhraseWords: SubtitleWord[] = [];
+
+    for (let i = 0; i < subtitles.length; i++) {
+      const word = subtitles[i];
+      const prevWord = currentPhraseWords[currentPhraseWords.length - 1];
+
+      // Start new phrase if:
+      // 1. Current phrase has >= 4 words
+      // 2. Pause between previous word and current word > 0.45s
+      // 3. Current phrase duration exceeds 2.6s
+      // 4. Word ends with punctuation (., !, ?, |)
+      const hasPause = prevWord && (word.start - prevWord.end > 0.45);
+      const isTooLong = currentPhraseWords.length >= 4;
+      const durationExceeded = currentPhraseWords.length > 0 && (word.end - currentPhraseWords[0].start > 2.6);
+      const hasPunctuation = prevWord && /[.!?|।]$/.test(prevWord.word.trim());
+
+      if (currentPhraseWords.length > 0 && (hasPause || isTooLong || durationExceeded || hasPunctuation)) {
+        phrases.push({
+          id: `phrase-${phrases.length}`,
+          start: currentPhraseWords[0].start,
+          end: currentPhraseWords[currentPhraseWords.length - 1].end + 0.35,
+          words: currentPhraseWords,
+        });
+        currentPhraseWords = [word];
+      } else {
+        currentPhraseWords.push(word);
+      }
+    }
+
+    if (currentPhraseWords.length > 0) {
+      phrases.push({
+        id: `phrase-${phrases.length}`,
+        start: currentPhraseWords[0].start,
+        end: currentPhraseWords[currentPhraseWords.length - 1].end + 0.35,
+        words: currentPhraseWords,
+      });
+    }
+
+    return phrases;
+  }, [subtitles]);
+
+  // Find active phrase and active word
+  const activePhrase = subtitlePhrases.find(
+    (p) => currentTime >= p.start - 0.05 && currentTime <= p.end
   );
   const activeWord = subtitles.find(
     (w) => currentTime >= w.start && currentTime <= w.end
   );
+  // Current display words: either full active phrase, or fallback to direct matches
+  const currentWords = activePhrase
+    ? activePhrase.words
+    : subtitles.filter((w) => currentTime >= w.start - 0.1 && currentTime <= w.end + 0.3);
 
   const toggleFullscreen = () => {
     const el = stageContainerRef.current;
@@ -726,23 +781,26 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
             </div>
           )}
 
-          {/* DYNAMIC SUBTITLES OVERLAY (18+ Viral Styles) */}
+          {/* DYNAMIC SUBTITLES OVERLAY (18+ Viral Styles & Hindi Devanagari Stack) */}
           {currentWords.length > 0 && (
             <div
-              className="absolute left-0 right-0 flex justify-center items-center pointer-events-none z-30 px-4"
-              style={{ bottom: `${subtitleStyle.positionY}%` }}
+              className="absolute left-0 right-0 flex justify-center items-center pointer-events-none z-30 px-6"
+              style={{ bottom: `${subtitleStyle.positionY || 20}%` }}
             >
               <div
-                className={`flex flex-wrap justify-center items-center gap-1.5 font-bold tracking-wide transition-all ${
+                className={`max-w-[92%] flex flex-wrap justify-center items-center gap-x-2 gap-y-1 font-black tracking-wide transition-all ${
                   subtitleStyle.textCase === 'uppercase' ? 'uppercase' : ''
                 } ${
-                  subtitleStyle.preset === 'documentary_italic' ? 'italic bg-black/70 px-4 py-1.5 rounded' : ''
+                  subtitleStyle.preset === 'documentary_italic' ? 'italic bg-black/80 px-5 py-2 rounded-xl border border-white/10' : ''
                 } ${
-                  subtitleStyle.preset === 'news_lower_third' ? 'bg-[#0F172A] border-l-4 border-red-500 px-4 py-1 rounded shadow-xl' : ''
+                  subtitleStyle.preset === 'news_lower_third' ? 'bg-[#0F172A]/90 border-l-4 border-red-500 px-5 py-2 rounded-lg shadow-2xl' : ''
                 }`}
                 style={{
-                  fontFamily: subtitleStyle.fontFamily,
-                  fontSize: `${Math.max(16, Math.min(36, viewportRect.width / 22))}px`,
+                  fontFamily: subtitleStyle.fontFamily
+                    ? `${subtitleStyle.fontFamily}, 'Poppins', 'Noto Sans Devanagari', 'Mukta', 'Montserrat', sans-serif`
+                    : `'Poppins', 'Noto Sans Devanagari', 'Mukta', 'Montserrat', sans-serif`,
+                  fontSize: `${Math.max(20, Math.min(46, Math.round((subtitleStyle.fontSize || 36) * Math.max(0.75, Math.min(1.25, viewportRect.width / 420)))))}px`,
+                  lineHeight: 1.25,
                 }}
               >
                 {currentWords.map((word) => {
@@ -755,29 +813,43 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
                       : '';
 
                   // Dynamic preset shadow & stroke calculations
-                  let customTextShadow = '0 2px 4px rgba(0,0,0,0.9)';
-                  if (subtitleStyle.preset === 'neon_cyberpunk') {
+                  let customTextShadow = '0 3px 6px rgba(0,0,0,0.95), 0 1px 2px rgba(0,0,0,0.9)';
+                  if (subtitleStyle.preset === 'hindi_attitude') {
                     customTextShadow = isCurrent
-                      ? '0 0 15px #00F0FF, 0 0 30px #FF007F'
-                      : '0 0 8px rgba(0,240,255,0.4)';
+                      ? '0 0 25px #FACC15, 0 0 50px rgba(250,204,21,0.4), 0 3px 8px rgba(0,0,0,1)'
+                      : '0 3px 6px rgba(0,0,0,0.95)';
+                  } else if (subtitleStyle.preset === 'bollywood_royal') {
+                    customTextShadow = isCurrent
+                      ? '0 0 30px #FF0055, 0 0 15px #FFE8A3, 0 3px 8px rgba(0,0,0,1)'
+                      : '0 3px 6px rgba(0,0,0,0.95)';
+                  } else if (subtitleStyle.preset === 'punjabi_drill') {
+                    customTextShadow = isCurrent
+                      ? '0 0 25px #00FFAA, 0 0 15px #00F0FF, 0 3px 8px rgba(0,0,0,1)'
+                      : '0 3px 6px rgba(0,0,0,0.95)';
+                  } else if (subtitleStyle.preset === 'neon_cyberpunk') {
+                    customTextShadow = isCurrent
+                      ? '0 0 20px #00F0FF, 0 0 40px #FF007F, 0 3px 8px rgba(0,0,0,1)'
+                      : '0 0 10px rgba(0,240,255,0.5), 0 3px 6px rgba(0,0,0,0.95)';
                   } else if (subtitleStyle.preset === 'retro_vhs') {
-                    customTextShadow = '-2px 0 #FF0055, 2px 0 #00FFFF, 0 2px 4px rgba(0,0,0,0.9)';
+                    customTextShadow = '-2px 0 #FF0055, 2px 0 #00FFFF, 0 3px 6px rgba(0,0,0,0.95)';
                   } else if (subtitleStyle.preset === 'comic_pop') {
-                    customTextShadow = '3px 3px 0 #FF0033, 0 2px 4px rgba(0,0,0,0.9)';
+                    customTextShadow = '3px 3px 0 #FF0033, 0 3px 6px rgba(0,0,0,0.95)';
                   } else if (subtitleStyle.preset === 'golden_luxury') {
                     customTextShadow = isCurrent
-                      ? '0 0 16px rgba(255,215,0,0.8), 0 2px 4px rgba(0,0,0,0.9)'
-                      : '0 2px 4px rgba(0,0,0,0.9)';
+                      ? '0 0 22px rgba(255,215,0,0.9), 0 3px 8px rgba(0,0,0,1)'
+                      : '0 3px 6px rgba(0,0,0,0.95)';
                   } else if (subtitleStyle.preset === 'typewriter') {
-                    customTextShadow = '0 0 8px #00FF66';
+                    customTextShadow = '0 0 10px #00FF66, 0 3px 6px rgba(0,0,0,0.95)';
                   } else if (subtitleStyle.preset === 'fire_gradient') {
-                    customTextShadow = '0 0 18px #FF4500, 0 2px 4px rgba(0,0,0,0.9)';
+                    customTextShadow = isCurrent
+                      ? '0 0 25px #FF4500, 0 0 45px #FF0000, 0 3px 8px rgba(0,0,0,1)'
+                      : '0 3px 6px rgba(0,0,0,0.95)';
                   } else if (subtitleStyle.preset === 'isometric_3d') {
                     customTextShadow = '1px 1px 0 #000, 2px 2px 0 #000, 3px 3px 0 #000, 4px 4px 0 #000';
                   } else if (subtitleStyle.preset === 'drop_shadow_studio') {
-                    customTextShadow = '0 8px 16px rgba(0,0,0,0.95)';
+                    customTextShadow = '0 8px 18px rgba(0,0,0,0.98)';
                   } else if (isCurrent) {
-                    customTextShadow = `0 0 14px ${subtitleStyle.highlightColor}80, 0 2px 4px rgba(0,0,0,0.9)`;
+                    customTextShadow = `0 0 20px ${subtitleStyle.highlightColor}B3, 0 3px 8px rgba(0,0,0,1)`;
                   }
 
                   const isBoxedPill = subtitleStyle.preset === 'boxed_pill' && isCurrent;
@@ -785,8 +857,10 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
                   return (
                     <span
                       key={word.id}
-                      className={`transition-all duration-75 ${animClass} ${
-                        isBoxedPill ? 'bg-amber-400 text-black px-2 py-0.5 rounded-md shadow-lg' : ''
+                      className={`inline-block transition-all duration-100 ${animClass} ${
+                        isCurrent ? 'scale-110 z-10' : 'scale-100 opacity-95'
+                      } ${
+                        isBoxedPill ? 'bg-amber-400 text-black px-2.5 py-0.5 rounded-lg shadow-2xl font-black' : ''
                       }`}
                       style={{
                         color: isBoxedPill
@@ -796,7 +870,7 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
                           : subtitleStyle.textColor,
                         WebkitTextStroke: isBoxedPill
                           ? '0px transparent'
-                          : `${subtitleStyle.strokeWidth}px ${subtitleStyle.strokeColor}`,
+                          : `${Math.max(2, subtitleStyle.strokeWidth || 4)}px ${subtitleStyle.strokeColor || '#000000'}`,
                         textShadow: isBoxedPill ? 'none' : customTextShadow,
                       }}
                     >

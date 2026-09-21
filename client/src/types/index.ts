@@ -60,7 +60,10 @@ export type SubtitlePreset =
   | 'y2k_aesthetic'
   | 'news_lower_third'
   | 'anime_speed'
-  | 'drop_shadow_studio';
+  | 'drop_shadow_studio'
+  | 'hindi_attitude'
+  | 'bollywood_royal'
+  | 'punjabi_drill';
 
 export interface SubtitleStyle {
   preset: SubtitlePreset | string;

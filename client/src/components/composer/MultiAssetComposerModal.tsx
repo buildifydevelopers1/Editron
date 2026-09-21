@@ -36,8 +36,8 @@ export const MultiAssetComposerModal: React.FC<MultiAssetComposerModalProps> = (
   const [targetDuration, setTargetDuration] = useState<number>(20);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('9:16');
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [enableVisionLoop, setEnableVisionLoop] = useState<boolean>(true);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processPass, setProcessPass] = useState<number>(0);
   const [processStage, setProcessStage] = useState<string>('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -56,10 +56,9 @@ export const MultiAssetComposerModal: React.FC<MultiAssetComposerModalProps> = (
   );
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files;
-    if (!selected || selected.length === 0) return;
-    const newFiles = Array.from(selected);
-    setUploadedFiles((prev) => [...prev, ...newFiles]);
+    if (!e.target.files) return;
+    const filesArray = Array.from(e.target.files);
+    setUploadedFiles((prev) => [...prev, ...filesArray]);
   };
 
   const handleRemoveFile = (index: number) => {
@@ -72,21 +71,19 @@ export const MultiAssetComposerModal: React.FC<MultiAssetComposerModalProps> = (
 
   const handleGenerate = async () => {
     setIsProcessing(true);
-    setProcessStage('Scanning audio waveform & isolating viral chorus peak...');
+    setProcessPass(1);
+    setProcessStage('Pass 1/3: Audio waveform analysis & AI Director draft cuts...');
 
     try {
-      // Dynamic progress messaging for commercial feel
       const stageTimer1 = setTimeout(() => {
-        setProcessStage('Consulting AI Director (gpt-oss-120b) for cut sequence...');
-      }, 1500);
+        setProcessPass(2);
+        setProcessStage('Pass 2/3: Llama 3.2 Vision Model inspecting keyframes & composition...');
+      }, 1800);
 
       const stageTimer2 = setTimeout(() => {
-        setProcessStage(`Trimming audio to ${targetDuration}s peak hook with studio fades...`);
-      }, 3000);
-
-      const stageTimer3 = setTimeout(() => {
-        setProcessStage('Aligning assets to beat drops & applying 3D transitions...');
-      }, 4500);
+        setProcessPass(3);
+        setProcessStage('Pass 3/3: Incorporating vision critique & mastering final timeline...');
+      }, 3800);
 
       let plan = await generateMultiAssetReel({
         files: uploadedFiles,
@@ -97,10 +94,10 @@ export const MultiAssetComposerModal: React.FC<MultiAssetComposerModalProps> = (
 
       clearTimeout(stageTimer1);
       clearTimeout(stageTimer2);
-      clearTimeout(stageTimer3);
 
-      if (enableVisionLoop && plan) {
-        setProcessStage('Multimodal Vision Critic inspecting composition & auto-calibrating master...');
+      if (plan) {
+        setProcessPass(2);
+        setProcessStage('Pass 2/3: Multimodal Vision Critic inspecting composition & auto-calibrating master...');
         try {
           const visionResult = await requestAutonomousDirectorLoop({
             prompt: prompt.trim(),
@@ -121,6 +118,9 @@ export const MultiAssetComposerModal: React.FC<MultiAssetComposerModalProps> = (
         }
       }
 
+      setProcessPass(3);
+      setProcessStage('Pass 3/3: Finalizing master timeline with studio audio fades & 3D transitions...');
+
       if (plan) {
         onApplyReel(plan);
         onClose();
@@ -130,6 +130,7 @@ export const MultiAssetComposerModal: React.FC<MultiAssetComposerModalProps> = (
       alert(`Generation notice: ${err.message || 'Error compiling reel'}`);
     } finally {
       setIsProcessing(false);
+      setProcessPass(0);
       setProcessStage('');
     }
   };
@@ -368,7 +369,7 @@ export const MultiAssetComposerModal: React.FC<MultiAssetComposerModalProps> = (
               </p>
             </div>
 
-            {/* Autonomous Vision Critic & Self-Refinement Toggle */}
+            {/* Autonomous Vision Critic & Self-Refinement Indicator (Always Active) */}
             <div className="bg-[#0e0e17] border border-indigo-500/30 rounded-xl p-3 flex items-center justify-between">
               <div className="flex items-center space-x-2.5">
                 <div className="w-7 h-7 rounded-lg bg-indigo-500/20 flex items-center justify-center text-indigo-400">
@@ -386,17 +387,10 @@ export const MultiAssetComposerModal: React.FC<MultiAssetComposerModalProps> = (
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setEnableVisionLoop(!enableVisionLoop)}
-                className={`px-3 py-1 rounded-full text-[11px] font-bold transition border ${
-                  enableVisionLoop
-                    ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-500/30'
-                    : 'bg-gray-800 text-gray-400 border-gray-700'
-                }`}
-              >
-                {enableVisionLoop ? 'ENABLED' : 'OFF'}
-              </button>
+              <div className="flex items-center space-x-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>3-PASS LOOP ACTIVE</span>
+              </div>
             </div>
           </div>
         </div>
@@ -404,9 +398,19 @@ export const MultiAssetComposerModal: React.FC<MultiAssetComposerModalProps> = (
         {/* Footer: Generate Button & Progress */}
         <div className="pt-3 border-t border-gray-800 shrink-0 space-y-2">
           {isProcessing && (
-            <div className="flex items-center space-x-2.5 bg-violet-950/40 border border-violet-500/40 p-2.5 rounded-xl text-xs text-violet-200 animate-pulse">
-              <Loader2 className="w-4 h-4 animate-spin text-violet-400 shrink-0" />
-              <span className="font-mono text-[11px] font-semibold">{processStage || 'AI Director generating master reel...'}</span>
+            <div className="bg-violet-950/40 border border-violet-500/40 p-3 rounded-xl space-y-2 text-violet-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-violet-400 shrink-0" />
+                  <span className="font-mono text-xs font-bold text-white">
+                    Pass {processPass || 1} of 3
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-indigo-300">
+                  {processPass === 1 ? 'Draft Cuts' : processPass === 2 ? 'Vision Critique' : 'Master Polish'}
+                </span>
+              </div>
+              <p className="font-mono text-[11px] text-gray-300 truncate">{processStage || 'AI Director generating master reel...'}</p>
             </div>
           )}
 

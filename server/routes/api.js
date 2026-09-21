@@ -654,9 +654,12 @@ router.post('/ai-edit', async (req, res) => {
  */
 router.post('/generate-subtitles', async (req, res) => {
   try {
-    const { videoPath, audioPath, prompt = 'generate subtitles', duration = 30, stylePreset = 'hormozi' } = req.body;
+    const { videoPath, audioPath, prompt = 'generate subtitles', duration = 30, stylePreset } = req.body;
     let resolvedAudioPath = resolveMediaFilePath(audioPath);
     let resolvedVideoPath = resolveMediaFilePath(videoPath);
+
+    const p = (prompt || '').toLowerCase();
+    const isHindiRequested = p.includes('hindi') || p.includes('hinglish') || p.includes('punjabi') || p.includes('desi') || p.includes('bollywood') || p.includes('devanagari');
 
     // If no direct audio path but video exists, attempt audio extraction
     if (!resolvedAudioPath && resolvedVideoPath) {
@@ -676,15 +679,17 @@ router.post('/generate-subtitles', async (req, res) => {
       try {
         speechTranscript = await AIService.transcribeAudio({
           audioFilePath: resolvedAudioPath,
+          language: isHindiRequested ? 'hi' : undefined,
+          promptHint: isHindiRequested ? 'Hindi Bollywood lyrics, Devnagari attitude captions, Hindi speech' : undefined
         });
       } catch (tErr) {
         console.warn('Whisper transcription attempt notice:', tErr.message);
       }
     }
 
-    const p = (prompt || '').toLowerCase();
-    const hasSpeech = speechTranscript && speechTranscript.words && speechTranscript.words.length > 0 && speechTranscript.text && speechTranscript.text.trim().length > 3;
-    const explicitlyRequestsCreativeCaptions = p.includes('attitude') || p.includes('quote') || p.includes('lyrics') || p.includes('motivat') || p.includes('cyber') || p.includes('viral');
+    const isEnglishMockOrSample = speechTranscript && speechTranscript.text && speechTranscript.text.includes('Welcome to Editron');
+    const hasSpeech = speechTranscript && speechTranscript.words && speechTranscript.words.length > 0 && speechTranscript.text && speechTranscript.text.trim().length > 3 && !isEnglishMockOrSample;
+    const explicitlyRequestsCreativeCaptions = isHindiRequested || p.includes('attitude') || p.includes('quote') || p.includes('lyrics') || p.includes('motivat') || p.includes('cyber') || p.includes('viral');
 
     // If real speech is present and prompt didn't ask to replace with custom creative captions:
     if (hasSpeech && !explicitlyRequestsCreativeCaptions) {
@@ -698,11 +703,12 @@ router.post('/generate-subtitles', async (req, res) => {
       });
     }
 
-    // Otherwise, generate prompt-driven timed captions with gpt-oss-120b
+    // Otherwise, generate prompt-driven timed captions with gpt-oss-120b or heuristic engine
+    const activePreset = stylePreset || (isHindiRequested ? 'hindi_attitude' : 'hormozi');
     const aiSubtitles = await AIService.generateSubtitlesFromPrompt({
       prompt,
       duration: duration || (speechTranscript?.duration || 30),
-      stylePreset
+      stylePreset: activePreset
     });
 
     res.json({
@@ -710,7 +716,7 @@ router.post('/generate-subtitles', async (req, res) => {
       source: 'ai-director',
       subtitles: aiSubtitles.words || [],
       subtitleStyle: aiSubtitles.subtitleStyle,
-      summary: aiSubtitles.summary || `Synthesized dynamic word subtitles synchronized to ${duration}s timeline.`
+      summary: aiSubtitles.summary || `Synthesized dynamic ${isHindiRequested ? 'Hindi' : 'English'} word subtitles synchronized to ${duration}s timeline.`
     });
   } catch (err) {
     console.error('Subtitle generation failed:', err);

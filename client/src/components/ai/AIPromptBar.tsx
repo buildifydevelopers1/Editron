@@ -9,7 +9,6 @@ interface AIPromptBarProps {
   onUploadPhotos?: () => void;
   photosCount?: number;
   onOpenMultiComposer?: () => void;
-  onOpenAutonomousDirector?: () => void;
 }
 
 export const AIPromptBar: React.FC<AIPromptBarProps> = ({
@@ -20,7 +19,6 @@ export const AIPromptBar: React.FC<AIPromptBarProps> = ({
   onUploadPhotos,
   photosCount = 0,
   onOpenMultiComposer,
-  onOpenAutonomousDirector,
 }) => {
   const [inputPrompt, setInputPrompt] = useState('');
 
@@ -31,9 +29,14 @@ export const AIPromptBar: React.FC<AIPromptBarProps> = ({
       prompt: 'generate subtitles for this video and align to audio',
     },
     {
-      label: '🧠 Autonomous Vision Edit',
+      label: '🇮🇳 Hindi Subtitles (हिंदी)',
+      icon: <Subtitles className="w-3 h-3 text-resolve-orange" />,
+      prompt: 'generate hindi subtitles with bold attitude lines in devanagari script',
+    },
+    {
+      label: '🎬 Cinematic Master Edit',
       icon: <Wand2 className="w-3 h-3 text-indigo-300" />,
-      prompt: 'run autonomous director loop with vision critique and self improvement',
+      prompt: 'Produce a complete broadcast master edit with dynamic cuts, color grading, and viral captions',
     },
     {
       label: photosCount > 0 ? `📸 Rebuild Reel with My ${photosCount} Photos` : '📸 10 Photos to Attitude Reel',
@@ -128,18 +131,6 @@ export const AIPromptBar: React.FC<AIPromptBarProps> = ({
           >
             <Sparkles className="w-3 h-3 text-amber-300 animate-pulse" />
             <span>Multi-Asset Studio</span>
-          </button>
-        )}
-
-        {onOpenAutonomousDirector && (
-          <button
-            type="button"
-            onClick={onOpenAutonomousDirector}
-            disabled={isProcessing}
-            className="flex items-center space-x-1.5 bg-gradient-to-r from-indigo-600/40 via-purple-600/40 to-pink-600/40 hover:from-indigo-600/60 hover:to-pink-600/60 border border-indigo-500/50 hover:border-indigo-400 text-indigo-200 hover:text-white px-3 py-1 rounded text-xs font-bold whitespace-nowrap transition disabled:opacity-50 shadow-sm"
-          >
-            <Wand2 className="w-3 h-3 text-cyan-300" />
-            <span>Autonomous AI Loop</span>
           </button>
         )}
       </div>

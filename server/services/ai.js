@@ -23,23 +23,29 @@ export class AIService {
   /**
    * Transcribe audio using Groq Whisper (or configured whisper model)
    */
-  static async transcribeAudio({ audioFilePath, apiKey, baseUrl, model }) {
+  static async transcribeAudio({ audioFilePath, apiKey, baseUrl, model, language, promptHint }) {
     const client = this.getClient(apiKey, baseUrl);
     const whisperModel = model || config.get('groqWhisperModel') || 'whisper-large-v3';
 
+    const isHindi = language === 'hi' || (promptHint && promptHint.toLowerCase().includes('hindi'));
+
     if (!client) {
       console.log('No API key provided. Using built-in demonstration transcript.');
-      return this.generateMockTranscript();
+      return this.generateMockTranscript(isHindi);
     }
 
     try {
       const fileStream = fs.createReadStream(audioFilePath);
-      const response = await client.audio.transcriptions.create({
+      const options = {
         file: fileStream,
         model: whisperModel,
         response_format: 'verbose_json',
         timestamp_granularities: ['word', 'segment']
-      });
+      };
+      if (language) options.language = language;
+      if (promptHint) options.prompt = promptHint;
+
+      const response = await client.audio.transcriptions.create(options);
 
       const segments = response.segments || [];
       const words = response.words || [];
@@ -65,7 +71,7 @@ export class AIService {
       };
     } catch (err) {
       console.warn('Whisper API call failed, falling back to mock transcript:', err.message);
-      return this.generateMockTranscript();
+      return this.generateMockTranscript(isHindi);
     }
   }
 
@@ -596,7 +602,34 @@ Output ONLY a JSON object with this EXACT structure:
   /**
    * Built-in rich demo transcript for immediate exploration
    */
-  static generateMockTranscript() {
+  static generateMockTranscript(isHindi = false) {
+    if (isHindi) {
+      return {
+        text: "खामोशी में मेहनत करो ताकि तुम्हारी सफलता शोर मचा दे। जीतना हमारी आदत है!",
+        duration: 12.0,
+        segments: [
+          { id: 'seg-0', start: 0.4, end: 4.5, text: "खामोशी में मेहनत करो" },
+          { id: 'seg-1', start: 4.8, end: 8.5, text: "ताकि तुम्हारी सफलता शोर मचा दे।" },
+          { id: 'seg-2', start: 8.8, end: 11.5, text: "जीतना हमारी आदत है!" }
+        ],
+        words: [
+          { id: 'w-0', word: 'खामोशी', start: 0.4, end: 1.1 },
+          { id: 'w-1', word: 'में', start: 1.1, end: 1.4 },
+          { id: 'w-2', word: 'मेहनत', start: 1.4, end: 2.1 },
+          { id: 'w-3', word: 'करो', start: 2.1, end: 2.7 },
+          { id: 'w-4', word: 'ताकि', start: 3.2, end: 3.6 },
+          { id: 'w-5', word: 'तुम्हारी', start: 3.6, end: 4.4 },
+          { id: 'w-6', word: 'सफलता', start: 4.8, end: 5.6 },
+          { id: 'w-7', word: 'शोर', start: 5.8, end: 6.4 },
+          { id: 'w-8', word: 'मचा', start: 6.4, end: 6.9 },
+          { id: 'w-9', word: 'दे।', start: 6.9, end: 7.5 },
+          { id: 'w-10', word: 'जीतना', start: 8.5, end: 9.3 },
+          { id: 'w-11', word: 'हमारी', start: 9.3, end: 10.0 },
+          { id: 'w-12', word: 'आदत', start: 10.0, end: 10.7 },
+          { id: 'w-13', word: 'है!', start: 10.7, end: 11.4 }
+        ]
+      };
+    }
     return {
       text: "Welcome to Editron, the world's most powerful AI video editor inspired by DaVinci Resolve. Today, we're going to transform your raw footage into a cinematic masterpiece in seconds!",
       duration: 12.0,
@@ -687,32 +720,41 @@ Output ONLY a JSON object with this EXACT structure:
       return this.generateHeuristicSubtitlesFromPrompt(prompt, duration, stylePreset);
     }
 
+    const p = (prompt || '').toLowerCase();
+    const isHindi = p.includes('hindi') || p.includes('hinglish') || p.includes('punjabi') || p.includes('desi') || p.includes('bollywood') || p.includes('devanagari');
+
     const systemPrompt = `You are Editron's Chief Typography & Subtitle Director.
 Your task is to generate punchy, viral, synchronized word-by-word subtitles and an optimal typography style based on the user's prompt and theme.
 
 The total timeline duration is ${duration.toFixed(1)} seconds.
 Generate an array of timed words covering key rhythmic intervals (e.g. 10 to 30 words total in short, punchy 2-4 word phrases).
 Words must have continuous, realistic 'start' and 'end' timestamps strictly within 0.0 and ${duration.toFixed(1)}s.
+${isHindi ? `
+CRITICAL LANGUAGE INSTRUCTION:
+The user explicitly requested HINDI / HINGLISH subtitles.
+You MUST write authentic Hindi subtitles (in Devanagari script हिंदी or Hinglish Roman script, based on user prompt).
+Example lines: 'खामोशी में मेहनत', 'सफलता का शोर', 'नाम ही काफी है', 'हमसे मुकाबला नहीं', 'अपना दौर आएगा', 'जीत पक्की है'.
+Use fontFamily: "'Poppins', 'Noto Sans Devanagari', 'Mukta', 'Montserrat', sans-serif" and preset: "hindi_attitude" or "hormozi".` : ''}
 
 Output ONLY a JSON object with this EXACT structure:
 {
   "summary": "Short explanation of the subtitle theme and timing rhythm",
   "subtitleStyle": {
-    "preset": "hormozi / neon_cyberpunk / mrbeast / karaoke_glow / fire_gradient / retro_vhs / comic_pop / golden_luxury",
-    "fontFamily": "'Montserrat', Impact, sans-serif",
+    "preset": "${isHindi ? 'hindi_attitude' : 'hormozi'}",
+    "fontFamily": "'Poppins', 'Noto Sans Devanagari', 'Mukta', 'Montserrat', sans-serif",
     "fontSize": 38,
     "textColor": "#FFFFFF",
     "highlightColor": "#FACC15",
     "strokeColor": "#000000",
-    "strokeWidth": 4,
+    "strokeWidth": 5,
     "textCase": "uppercase",
     "animation": "bounce",
     "positionY": 22
   },
   "words": [
-    { "id": "w-0", "word": "NEVER", "start": 0.5, "end": 0.9 },
-    { "id": "w-1", "word": "STOP", "start": 0.9, "end": 1.4 },
-    { "id": "w-2", "word": "GRINDING", "start": 1.4, "end": 2.1 }
+    { "id": "w-0", "word": "${isHindi ? 'खामोशी' : 'NEVER'}", "start": 0.5, "end": 1.1 },
+    { "id": "w-1", "word": "${isHindi ? 'में' : 'STOP'}", "start": 1.1, "end": 1.5 },
+    { "id": "w-2", "word": "${isHindi ? 'मेहनत' : 'GRINDING'}", "start": 1.5, "end": 2.2 }
   ]
 }`;
 
@@ -751,7 +793,11 @@ Generate synchronized word subtitles for this sequence.`;
    */
   static generateHeuristicSubtitlesFromPrompt(prompt = '', duration = 30, stylePreset = 'hormozi') {
     const p = prompt.toLowerCase();
-    let preset = stylePreset || 'hormozi';
+    const isHindi = p.includes('hindi') || p.includes('hinglish') || p.includes('punjabi') || p.includes('desi') || p.includes('bollywood') || p.includes('devanagari');
+    const isDevanagari = isHindi && !p.includes('hinglish') && !p.includes('roman') && !p.includes('english');
+    const isHinglish = isHindi && (p.includes('hinglish') || p.includes('roman'));
+
+    let preset = stylePreset || (isDevanagari || isHinglish ? 'hindi_attitude' : 'hormozi');
 
     if (p.includes('neon') || p.includes('cyber')) preset = 'neon_cyberpunk';
     else if (p.includes('mrbeast') || p.includes('beast')) preset = 'mrbeast';
@@ -760,8 +806,10 @@ Generate synchronized word subtitles for this sequence.`;
     else if (p.includes('comic') || p.includes('funny')) preset = 'comic_pop';
     else if (p.includes('gold') || p.includes('luxury')) preset = 'golden_luxury';
     else if (p.includes('fire') || p.includes('flame')) preset = 'fire_gradient';
+    else if (p.includes('punjabi')) preset = 'punjabi_drill';
+    else if (isDevanagari) preset = 'hindi_attitude';
 
-    // Curated quotes library tailored by theme
+    // Curated quotes library tailored by theme & language
     let phrasePool = [
       'RULE NUMBER ONE',
       'NEVER DOUBT YOURSELF',
@@ -773,7 +821,56 @@ Generate synchronized word subtitles for this sequence.`;
       'WATCH ME LEVEL UP 🔥'
     ];
 
-    if (p.includes('motivat') || p.includes('inspire') || p.includes('success')) {
+    if (isDevanagari) {
+      if (p.includes('song') || p.includes('lyrics') || p.includes('music') || p.includes('love') || p.includes('romantic')) {
+        phrasePool = [
+          'कदम चूम लेती है मंजिल',
+          'हौसलों में जान होनी चाहिए',
+          'वक्त बदलता है सबका',
+          'अपनी अलग पहचान है',
+          'राहें खुद बन जाती हैं',
+          'सितारों से आगे जहां',
+          'आवाज में सच्चा दम है',
+          'धुन पे थिरकती जिंदगी 🔥'
+        ];
+      } else {
+        phrasePool = [
+          'नियम नंबर एक',
+          'खामोशी में मेहनत करो',
+          'सफलता का शोर होगा',
+          'हमसे मुकाबला नहीं',
+          'नाम ही काफी है',
+          'अपनी अलग पहचान',
+          'वक्त सबका आता है',
+          'हमारा दौर आएगा 🔥',
+          'जीत पक्की है',
+          'रुकेगा नहीं कभी'
+        ];
+      }
+    } else if (isHinglish) {
+      phrasePool = [
+        'RULE NUMBER ONE',
+        'KHAMOSHI ME MEHNAT',
+        'SAFALTA KA SHOR',
+        'NAAM HI KAAFI HAI',
+        'HUMSE MUQABLA NAHI',
+        'APNA TIME AAYEGA',
+        'LEVEL ALAG HAI 🔥',
+        'ASLI SHIKARI HUM HAI',
+        'JEET PAKKI HAI'
+      ];
+    } else if (p.includes('punjabi')) {
+      phrasePool = [
+        'DIL DA NI MAADA',
+        'ASOOL PUKHTA NE',
+        'LEVEL UP EVERY DAY',
+        'HAWA WICH NAAM',
+        'YAARAN DA GROUP',
+        'NO COMPROMISE 🔥',
+        'HIGH ROLLER DRILL',
+        'GAME CHANGER'
+      ];
+    } else if (p.includes('motivat') || p.includes('inspire') || p.includes('success')) {
       phrasePool = [
         'DREAM BIG ALWAYS',
         'WORK IN SILENCE',
@@ -833,9 +930,45 @@ Generate synchronized word subtitles for this sequence.`;
     }
 
     const styleMap = {
+      hindi_attitude: {
+        preset: 'hindi_attitude',
+        fontFamily: "'Poppins', 'Noto Sans Devanagari', 'Mukta', 'Montserrat', sans-serif",
+        fontSize: 38,
+        textColor: '#FFFFFF',
+        highlightColor: '#FACC15',
+        strokeColor: '#000000',
+        strokeWidth: 5,
+        textCase: 'uppercase',
+        animation: 'bounce',
+        positionY: 22
+      },
+      bollywood_royal: {
+        preset: 'bollywood_royal',
+        fontFamily: "'Mukta', 'Poppins', 'Noto Sans Devanagari', sans-serif",
+        fontSize: 38,
+        textColor: '#FFFBEB',
+        highlightColor: '#FF0055',
+        strokeColor: '#000000',
+        strokeWidth: 5,
+        textCase: 'uppercase',
+        animation: 'pop',
+        positionY: 22
+      },
+      punjabi_drill: {
+        preset: 'punjabi_drill',
+        fontFamily: "'Poppins', 'Montserrat', sans-serif",
+        fontSize: 38,
+        textColor: '#FFFFFF',
+        highlightColor: '#00FFAA',
+        strokeColor: '#000000',
+        strokeWidth: 5,
+        textCase: 'uppercase',
+        animation: 'glow',
+        positionY: 22
+      },
       hormozi: {
         preset: 'hormozi',
-        fontFamily: "'Montserrat', Impact, sans-serif",
+        fontFamily: "'Poppins', 'Montserrat', 'Noto Sans Devanagari', Impact, sans-serif",
         fontSize: 38,
         textColor: '#FFFFFF',
         highlightColor: '#FACC15',

@@ -281,19 +281,26 @@ export const SubtitleStyler: React.FC<SubtitleStylerProps> = ({
               {onGenerateSubtitles && (
                 <div className="flex flex-wrap justify-center gap-2">
                   <button
-                    onClick={() => onGenerateSubtitles('generate subtitles for speech or dialogue')}
+                    onClick={() => onGenerateSubtitles('generate hindi subtitles with bold attitude quotes')}
                     disabled={isGeneratingSubtitles}
                     className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold bg-resolve-orange hover:bg-resolve-orange-hover text-black rounded-lg transition shadow-md disabled:opacity-50"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>Auto-Transcribe Audio (Whisper)</span>
+                    <span>🇮🇳 Hindi Attitude Subtitles (हिंदी)</span>
                   </button>
                   <button
-                    onClick={() => onGenerateSubtitles('generate bold attitude reel subtitles')}
+                    onClick={() => onGenerateSubtitles('generate hinglish viral reel lyrics')}
+                    disabled={isGeneratingSubtitles}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 rounded-lg transition disabled:opacity-50"
+                  >
+                    <span>🔥 Hinglish Viral Lyrics</span>
+                  </button>
+                  <button
+                    onClick={() => onGenerateSubtitles('generate subtitles for speech or dialogue')}
                     disabled={isGeneratingSubtitles}
                     className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold bg-resolve-800 hover:bg-resolve-750 text-gray-200 border border-resolve-700 rounded-lg transition disabled:opacity-50"
                   >
-                    <span>🔥 Attitude Captions</span>
+                    <span>🎙️ Auto-Transcribe Audio (Whisper)</span>
                   </button>
                   <button
                     onClick={() => onGenerateSubtitles('generate motivational viral captions')}

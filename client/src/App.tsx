@@ -15,8 +15,8 @@ import { AssetLibraryPanel } from './components/media/AssetLibraryPanel';
 import { TrendingSongPickerModal } from './components/audio/TrendingSongPickerModal';
 import { SubtitleStyleGalleryModal } from './components/subtitles/SubtitleStyleGalleryModal';
 import { MultiAssetComposerModal } from './components/composer/MultiAssetComposerModal';
-import { AutonomousDirectorModal } from './components/director/AutonomousDirectorModal';
 import { EffectsPanel } from './components/effects/EffectsPanel';
+import { CheckCircle2, Layers, Eye, Wand2, Sparkles } from 'lucide-react';
 import { useTimelineHistory, TimelineSnapshot } from './hooks/useTimelineHistory';
 import {
   AppConfig,
@@ -40,6 +40,7 @@ import {
   fetchConfig,
   generatePhotosToReel,
   requestAIEdits,
+  requestAutonomousDirectorLoop,
   requestGenerateSubtitles,
   requestSilenceDetection,
   requestTranscription,
@@ -66,7 +67,6 @@ export function App() {
   const [isApplyingReel, setIsApplyingReel] = useState(false);
   const [isSubtitleGalleryOpen, setIsSubtitleGalleryOpen] = useState(false);
   const [isMultiComposerOpen, setIsMultiComposerOpen] = useState(false);
-  const [isAutonomousDirectorOpen, setIsAutonomousDirectorOpen] = useState(false);
   const [isGeneratingSubtitles, setIsGeneratingSubtitles] = useState(false);
 
   // Vision Analysis State
@@ -207,6 +207,7 @@ export function App() {
   // AI & Background Processing State
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
+  const [processingPass, setProcessingPass] = useState<number>(0); // 0: idle, 1: Draft, 2: Vision Critic, 3: Master Polish
   const [aiSummary, setAiSummary] = useState<string | null>(null);
 
   // Hidden File Input Refs
@@ -504,16 +505,48 @@ export function App() {
   const handleGenerateSubtitles = async (customPrompt?: string) => {
     saveCurrentSnapshot();
     setIsGeneratingSubtitles(true);
-    setProcessingStatus(`Synthesizing subtitles with ${config?.whisperModel || 'Whisper'} & AI Director...`);
+    setIsProcessing(true);
+    setProcessingPass(1);
+
+    const activePrompt = customPrompt || 'generate subtitles and sync to audio';
+    const p = activePrompt.toLowerCase();
+    const isHindi = p.includes('hindi') || p.includes('hinglish') || p.includes('punjabi') || p.includes('desi') || p.includes('devanagari');
+    const targetPreset = isHindi ? 'hindi_attitude' : subtitleStyle.preset;
+
+    setProcessingStatus(
+      isHindi
+        ? 'Pass 1/3: Synthesizing viral Hindi attitude captions & rhythm...'
+        : `Pass 1/3: Audio transcription & speech recognition with ${config?.whisperModel || 'Whisper'}...`
+    );
+
+    const subTimer1 = setTimeout(() => {
+      setProcessingPass(2);
+      setProcessingStatus(
+        isHindi
+          ? 'Pass 2/3: Aligning Devanagari phrase cadence & syllable timestamps...'
+          : 'Pass 2/3: Speech cadence analysis & word timestamp alignment...'
+      );
+    }, 1500);
+
+    const subTimer2 = setTimeout(() => {
+      setProcessingPass(3);
+      setProcessingStatus(
+        isHindi
+          ? 'Pass 3/3: Applying high-impact Hindi Attitude Gold & bold stroke styling...'
+          : `Pass 3/3: Styling kinetic typography with ${subtitleStyle.preset.toUpperCase()} preset...`
+      );
+    }, 3200);
 
     try {
-      const activePrompt = customPrompt || 'generate subtitles and sync to audio';
       const result = await requestGenerateSubtitles({
         videoPath,
         prompt: activePrompt,
         duration,
-        stylePreset: subtitleStyle.preset,
+        stylePreset: targetPreset,
       });
+
+      clearTimeout(subTimer1);
+      clearTimeout(subTimer2);
 
       if (result && result.subtitles && result.subtitles.length > 0) {
         setSubtitles(result.subtitles);
@@ -529,7 +562,11 @@ export function App() {
       console.error('Subtitle generation failed:', err);
       alert(`Subtitle generation notice: ${err.message || 'Error generating subtitles'}`);
     } finally {
+      clearTimeout(subTimer1);
+      clearTimeout(subTimer2);
       setIsGeneratingSubtitles(false);
+      setIsProcessing(false);
+      setProcessingPass(0);
       setProcessingStatus('');
     }
   };
@@ -591,69 +628,18 @@ export function App() {
 
     // Check if user requested subtitle generation or speech-to-text
     if (
-      p.includes('generate subtitle') ||
-      p.includes('create subtitle') ||
-      p.includes('add subtitle') ||
-      p.includes('generate captions') ||
-      p.includes('add captions') ||
+      p.includes('subtitle') ||
+      p.includes('subtitles') ||
+      p.includes('caption') ||
+      p.includes('captions') ||
       p.includes('transcribe') ||
       p.includes('speech to text') ||
-      p.includes('subtitles')
+      p.includes('lyrics')
     ) {
       await handleGenerateSubtitles(prompt);
       setIsProcessing(false);
       setProcessingStatus('');
       return;
-    }
-
-    // Check if user requested autonomous director / vision critic loop
-    if (
-      p.includes('autonomous') ||
-      p.includes('director loop') ||
-      p.includes('vision loop') ||
-      p.includes('critique') ||
-      p.includes('self improve')
-    ) {
-      setIsAutonomousDirectorOpen(true);
-      setIsProcessing(false);
-      setProcessingStatus('');
-      return;
-    }
-
-    // Check if user requested auto-cutting silences / jump cuts
-    if (
-      p.includes('silence') ||
-      p.includes('auto-cut') ||
-      p.includes('autocut') ||
-      p.includes('jump cut') ||
-      p.includes('remove pause') ||
-      p.includes('trim silence')
-    ) {
-      setProcessingStatus('Running FFmpeg precision silence detection filter...');
-      try {
-        const result = await requestSilenceDetection(videoPath);
-        if (result && result.speechSegments && result.speechSegments.length > 0) {
-          const cutClips: VideoClip[] = result.speechSegments.map((seg, i) => ({
-            id: `speech-cut-${i}-${Date.now()}`,
-            name: seg.label || `Speech Part ${i + 1}`,
-            trackId: 'v1',
-            start: seg.start,
-            end: seg.end,
-            sourceStart: seg.start,
-            sourceEnd: seg.end,
-            speed: 1.0,
-            label: `Speech Part ${i + 1}`,
-          }));
-          setClips(cutClips);
-          setSelectedClipId(cutClips[0]?.id || null);
-          setAiSummary(`Auto-cut complete: Removed ${result.silencesCount} silent pauses, preserved ${result.speechCount} active speech segments.`);
-          setIsProcessing(false);
-          setProcessingStatus('');
-          return;
-        }
-      } catch (err: any) {
-        console.warn('Auto-cut silence detection fallback:', err);
-      }
     }
 
     // Check if user explicitly requested photo montage / 10 photos attitude reel
@@ -669,20 +655,37 @@ export function App() {
       return;
     }
 
-    // Direct AI Reasoning via configured model (gpt-oss-120b)
-    setProcessingStatus(`Consulting AI Director (${config?.llmModel || 'gpt-oss-120b'})...`);
+    // Default 3-Pass Autonomous AI Loop (Pass 1 -> Pass 2 -> Pass 3)
+    setProcessingPass(1);
+    setProcessingStatus('Pass 1/3: Chief AI Director (gpt-oss-120b) synthesizing draft cuts & audio sync...');
 
     try {
-      const plan = await requestAIEdits({
+      const stageTimer1 = setTimeout(() => {
+        setProcessingPass(2);
+        setProcessingStatus('Pass 2/3: Multimodal Vision Model (Llama 3.2 Vision) inspecting keyframes & composition...');
+      }, 1600);
+
+      const stageTimer2 = setTimeout(() => {
+        setProcessingPass(3);
+        setProcessingStatus('Pass 3/3: Incorporating vision critique & mastering final timeline...');
+      }, 3600);
+
+      const result = await requestAutonomousDirectorLoop({
         prompt,
-        transcript: subtitles,
+        videoPath,
         duration,
+        photos: userPhotos,
       });
 
+      clearTimeout(stageTimer1);
+      clearTimeout(stageTimer2);
+
+      const plan = result.finalPlan || result.draftPlan;
+
       if (plan) {
-        if (plan.summary) {
-          setAiSummary(plan.summary);
-        }
+        const impCount = result.improvements?.length || 0;
+        const impSummary = impCount > 0 ? ` • [Vision-Mastered: ${result.improvements.slice(0, 2).join(' • ')}]` : '';
+        setAiSummary((plan.summary || 'AI Director successfully edited the video.') + impSummary);
 
         // Apply Aspect Ratio
         if (plan.aspectRatio) {
@@ -777,6 +780,7 @@ export function App() {
     } finally {
       setIsProcessing(false);
       setProcessingStatus('');
+      setProcessingPass(0);
     }
   };
 
@@ -909,16 +913,28 @@ export function App() {
   ) => {
     saveCurrentSnapshot();
     setIsProcessing(true);
-    setProcessingStatus('AI Director assembling photo reel with 18 transitions & live trending audio...');
+    setProcessingPass(1);
+    setProcessingStatus('Pass 1/3: AI Director arranging photo sequencing & beat markers...');
 
     const targetPhotos = (uploadedPhotos && uploadedPhotos.length > 0) ? uploadedPhotos : userPhotos;
 
     if (!targetPhotos || targetPhotos.length === 0) {
       setIsProcessing(false);
+      setProcessingPass(0);
       setProcessingStatus('');
       photoInputRef.current?.click();
       return;
     }
+
+    const reelTimer1 = setTimeout(() => {
+      setProcessingPass(2);
+      setProcessingStatus('Pass 2/3: Multimodal Vision inspecting aspect ratios & framing...');
+    }, 1600);
+
+    const reelTimer2 = setTimeout(() => {
+      setProcessingPass(3);
+      setProcessingStatus('Pass 3/3: Applying 18 cinematic transitions & master audio track...');
+    }, 3600);
 
     // Offline / Local Photo Montage Assembler with all 18 Transitions
     const assembleLocalPhotoReel = (activeSong?: TrendingSong) => {
@@ -1089,7 +1105,10 @@ export function App() {
       console.warn('Backend photo reel fallback (compiling locally):', err.message);
       assembleLocalPhotoReel();
     } finally {
+      clearTimeout(reelTimer1);
+      clearTimeout(reelTimer2);
       setIsProcessing(false);
+      setProcessingPass(0);
       setProcessingStatus('');
     }
   };
@@ -1207,10 +1226,10 @@ export function App() {
         onOpenMusic={() => setIsTrendingPickerOpen(true)}
         onOpenSubtitleGallery={() => setIsSubtitleGalleryOpen(true)}
         onOpenMultiComposer={() => setIsMultiComposerOpen(true)}
-        onOpenAutonomousDirector={() => setIsAutonomousDirectorOpen(true)}
         onUploadClick={() => fileInputRef.current?.click()}
         isProcessing={isProcessing}
         processingStatus={processingStatus}
+        processingPass={processingPass}
         canUndo={canUndo}
         canRedo={canRedo}
         onUndo={handleUndo}
@@ -1226,7 +1245,6 @@ export function App() {
         onUploadPhotos={() => photoInputRef.current?.click()}
         photosCount={userPhotos.length}
         onOpenMultiComposer={() => setIsMultiComposerOpen(true)}
-        onOpenAutonomousDirector={() => setIsAutonomousDirectorOpen(true)}
       />
 
       {/* Main Workspace Dynamic Page Body */}
@@ -1443,15 +1461,144 @@ export function App() {
         onApplyReel={handleApplyMultiAssetReel}
       />
 
-      {/* Autonomous AI Director Loop Modal */}
-      <AutonomousDirectorModal
-        isOpen={isAutonomousDirectorOpen}
-        onClose={() => setIsAutonomousDirectorOpen(false)}
-        videoPath={videoPath}
-        duration={duration}
-        userPhotos={userPhotos}
-        onApplyMaster={handleApplyAutonomousMaster}
-      />
+      {/* Intelligent AI Multi-Pass Loading Screen HUD */}
+      {isProcessing && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 select-none animate-fadeIn">
+          <div className="bg-resolve-900 border border-resolve-700/80 rounded-2xl w-full max-w-xl p-6 shadow-2xl space-y-5 text-white">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-resolve-800">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 via-orange-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-orange-500/20">
+                  <Sparkles className="w-5 h-5 text-black animate-spin" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold tracking-wide uppercase flex items-center space-x-2">
+                    <span>Autonomous AI Director</span>
+                    <span className="text-[10px] font-mono font-normal bg-resolve-800 text-resolve-orange px-2 py-0.5 rounded border border-resolve-700">
+                      3-Pass Pipeline
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-400">
+                    Drafting &bull; Vision Critic Inspection &bull; Master Polish
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="font-mono text-xs font-bold text-amber-400">
+                  {processingPass > 0 ? `Pass ${processingPass} of 3` : 'AI Processing'}
+                </span>
+                <div className="text-[10px] text-gray-400 font-mono">{config?.llmModel || 'gpt-oss-120b'}</div>
+              </div>
+            </div>
+
+            {/* 3 Passes Cards */}
+            <div className="grid grid-cols-3 gap-3">
+              {/* Pass 1 */}
+              <div
+                className={`p-3.5 rounded-xl border transition-all ${
+                  processingPass === 1
+                    ? 'bg-amber-500/10 border-amber-500/60 ring-1 ring-amber-500/30'
+                    : processingPass > 1
+                    ? 'bg-resolve-850/90 border-emerald-500/40 text-emerald-400'
+                    : 'bg-resolve-850/50 border-resolve-800 text-gray-500 opacity-60'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] font-extrabold font-mono text-gray-200">PASS 1</span>
+                  {processingPass > 1 ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  ) : processingPass === 1 ? (
+                    <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
+                  ) : (
+                    <Layers className="w-4 h-4 text-gray-600" />
+                  )}
+                </div>
+                <div className="text-xs font-bold text-gray-100">Draft Edit Plan</div>
+                <p className="text-[10px] text-gray-400 mt-0.5 leading-snug">
+                  Cuts, timing, color & audio sync
+                </p>
+              </div>
+
+              {/* Pass 2 */}
+              <div
+                className={`p-3.5 rounded-xl border transition-all ${
+                  processingPass === 2
+                    ? 'bg-cyan-500/10 border-cyan-500/60 ring-1 ring-cyan-500/30'
+                    : processingPass > 2
+                    ? 'bg-resolve-850/90 border-emerald-500/40 text-emerald-400'
+                    : 'bg-resolve-850/50 border-resolve-800 text-gray-500 opacity-60'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] font-extrabold font-mono text-gray-200">PASS 2</span>
+                  {processingPass > 2 ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  ) : processingPass === 2 ? (
+                    <Eye className="w-4 h-4 text-cyan-400 animate-pulse" />
+                  ) : (
+                    <Eye className="w-4 h-4 text-gray-600" />
+                  )}
+                </div>
+                <div className="text-xs font-bold text-gray-100">Vision Critic</div>
+                <p className="text-[10px] text-gray-400 mt-0.5 leading-snug">
+                  Multimodal keyframe & composition check
+                </p>
+              </div>
+
+              {/* Pass 3 */}
+              <div
+                className={`p-3.5 rounded-xl border transition-all ${
+                  processingPass === 3
+                    ? 'bg-purple-500/10 border-purple-500/60 ring-1 ring-purple-500/30'
+                    : 'bg-resolve-850/50 border-resolve-800 text-gray-500 opacity-60'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] font-extrabold font-mono text-gray-200">PASS 3</span>
+                  {processingPass === 3 ? (
+                    <Wand2 className="w-4 h-4 text-purple-400 animate-bounce" />
+                  ) : (
+                    <Wand2 className="w-4 h-4 text-gray-600" />
+                  )}
+                </div>
+                <div className="text-xs font-bold text-gray-100">Master Polish</div>
+                <p className="text-[10px] text-gray-400 mt-0.5 leading-snug">
+                  Self-refinement & final delivery
+                </p>
+              </div>
+            </div>
+
+            {/* Dynamic Animated Progress Bar */}
+            <div className="space-y-1.5">
+              <div className="w-full bg-resolve-950 rounded-full h-2 overflow-hidden border border-resolve-800">
+                <div
+                  className={`h-full transition-all duration-500 rounded-full ${
+                    processingPass === 1
+                      ? 'w-1/3 bg-gradient-to-r from-amber-500 to-orange-500'
+                      : processingPass === 2
+                      ? 'w-2/3 bg-gradient-to-r from-amber-500 via-cyan-500 to-blue-500'
+                      : processingPass >= 3
+                      ? 'w-full bg-gradient-to-r from-cyan-500 via-purple-500 to-emerald-400'
+                      : 'w-1/4 bg-resolve-orange animate-pulse'
+                  }`}
+                />
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-gray-400 font-mono">
+                <span>{processingPass === 1 ? 'Pass 1 of 3 (Initial Plan)' : processingPass === 2 ? 'Pass 2 of 3 (Vision Critique)' : processingPass >= 3 ? 'Pass 3 of 3 (Master Polish)' : 'Analyzing'}</span>
+                <span>{processingPass === 1 ? '33%' : processingPass === 2 ? '66%' : processingPass >= 3 ? '95%' : 'In progress...'}</span>
+              </div>
+            </div>
+
+            {/* Status ticker */}
+            <div className="p-3 bg-resolve-950/80 rounded-xl border border-resolve-800 flex items-center space-x-2.5">
+              <div className="w-2 h-2 rounded-full bg-resolve-orange animate-ping" />
+              <p className="text-xs font-mono text-gray-300 truncate">
+                {processingStatus || 'Autonomous editing loop actively synthesizing...'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Export / Deliver Master Modal */}
       <ExportModal

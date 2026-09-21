@@ -27,6 +27,63 @@ export const ALL_SUBTITLE_PRESETS: {
   style: SubtitleStyle;
 }[] = [
   {
+    id: 'hindi_attitude',
+    name: '🇮🇳 Hindi Attitude Gold',
+    category: 'Viral Creators',
+    description: 'Extra-bold Devanagari & Hinglish font with explosive gold punch. #1 for Hindi Reels & Shorts.',
+    sampleWord: 'खामोशी में मेहनत 🔥',
+    style: {
+      preset: 'hindi_attitude',
+      fontFamily: "'Poppins', 'Noto Sans Devanagari', 'Mukta', 'Montserrat', sans-serif",
+      fontSize: 38,
+      textColor: '#FFFFFF',
+      highlightColor: '#FACC15',
+      strokeColor: '#000000',
+      strokeWidth: 5,
+      textCase: 'uppercase',
+      animation: 'bounce',
+      positionY: 22
+    }
+  },
+  {
+    id: 'bollywood_royal',
+    name: '👑 Bollywood Royal Crimson',
+    category: 'Viral Creators',
+    description: 'Luxurious gold text with vibrant ruby-crimson highlight for Bollywood songs and dramatic poetry.',
+    sampleWord: 'कदम चूम लेती है मंजिल',
+    style: {
+      preset: 'bollywood_royal',
+      fontFamily: "'Mukta', 'Poppins', 'Noto Sans Devanagari', sans-serif",
+      fontSize: 38,
+      textColor: '#FFFBEB',
+      highlightColor: '#FF0055',
+      strokeColor: '#000000',
+      strokeWidth: 5,
+      textCase: 'uppercase',
+      animation: 'pop',
+      positionY: 22
+    }
+  },
+  {
+    id: 'punjabi_drill',
+    name: '⚡ Punjabi Drill Neon',
+    category: 'High-Energy & Comic',
+    description: 'Electric cyan and neon mint pop on heavy bold typography. Tailored for Punjabi drill & attitude beats.',
+    sampleWord: 'LEVEL ALAG HAI ⚡',
+    style: {
+      preset: 'punjabi_drill',
+      fontFamily: "'Poppins', 'Montserrat', sans-serif",
+      fontSize: 38,
+      textColor: '#FFFFFF',
+      highlightColor: '#00FFAA',
+      strokeColor: '#000000',
+      strokeWidth: 5,
+      textCase: 'uppercase',
+      animation: 'glow',
+      positionY: 22
+    }
+  },
+  {
     id: 'hormozi',
     name: 'Alex Hormozi Viral',
     category: 'Viral Creators',
@@ -34,7 +91,7 @@ export const ALL_SUBTITLE_PRESETS: {
     sampleWord: 'MASSIVE RESULTS',
     style: {
       preset: 'hormozi',
-      fontFamily: "'Montserrat', Impact, sans-serif",
+      fontFamily: "'Poppins', 'Montserrat', 'Noto Sans Devanagari', Impact, sans-serif",
       fontSize: 36,
       textColor: '#FFFFFF',
       highlightColor: '#FACC15',

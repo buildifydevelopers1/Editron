@@ -30,10 +30,10 @@ interface WorkspaceHeaderProps {
   onOpenMusic: () => void;
   onOpenSubtitleGallery: () => void;
   onOpenMultiComposer?: () => void;
-  onOpenAutonomousDirector?: () => void;
   onUploadClick: () => void;
   isProcessing: boolean;
   processingStatus: string;
+  processingPass?: number;
   canUndo?: boolean;
   canRedo?: boolean;
   onUndo?: () => void;
@@ -50,10 +50,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   onOpenMusic,
   onOpenSubtitleGallery,
   onOpenMultiComposer,
-  onOpenAutonomousDirector,
   onUploadClick,
   isProcessing,
   processingStatus,
+  processingPass = 0,
   canUndo = false,
   canRedo = false,
   onUndo,
@@ -145,9 +145,13 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       <div className="flex items-center space-x-2">
         {/* Processing Indicator */}
         {isProcessing && (
-          <div className="flex items-center space-x-2 bg-resolve-850 border border-resolve-orange/40 text-resolve-orange px-2.5 py-1 rounded text-xs animate-pulse">
-            <Sparkles className="w-3.5 h-3.5 animate-spin" />
-            <span className="max-w-[150px] truncate">{processingStatus || 'AI Editing...'}</span>
+          <div className="flex items-center space-x-2 bg-resolve-850 border border-resolve-orange/40 text-resolve-orange px-2.5 py-1 rounded-full text-xs animate-pulse shadow-sm">
+            <Sparkles className="w-3.5 h-3.5 animate-spin text-amber-400" />
+            <span className="font-mono font-bold text-[11px] text-amber-300">
+              {processingPass > 0 ? `Pass ${processingPass}/3` : 'AI Engine'}
+            </span>
+            <span className="text-gray-500">•</span>
+            <span className="max-w-[170px] truncate text-gray-200">{processingStatus || 'AI Editing...'}</span>
           </div>
         )}
 
@@ -202,18 +206,6 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           >
             <Wand2 className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
             <span>AI Composer</span>
-          </button>
-        )}
-
-        {/* Autonomous Director Loop Button */}
-        {onOpenAutonomousDirector && (
-          <button
-            onClick={onOpenAutonomousDirector}
-            title="Autonomous Multi-Pass AI Director (Plan -> Vision Critic -> Polish)"
-            className="flex items-center space-x-1.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-purple-500 text-white px-3 py-1 rounded text-xs font-bold transition shadow-md shadow-purple-500/20"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-cyan-300 animate-pulse" />
-            <span>AI Director Loop</span>
           </button>
         )}
 
