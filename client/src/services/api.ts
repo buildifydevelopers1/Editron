@@ -189,24 +189,39 @@ export async function requestAIEdits({
 export async function requestRender({
   videoPath,
   cuts,
+  audioTrackPath,
+  videoAudioVolume = 1.0,
+  bgAudioVolume = 0.8,
   colorGrading,
   subtitleWords,
+  resolution = '1080p',
+  framerate = 30,
   aspectRatio,
 }: {
   videoPath: string;
   cuts: VideoClip[];
+  audioTrackPath?: string | null;
+  videoAudioVolume?: number;
+  bgAudioVolume?: number;
   colorGrading: ColorGradingSettings;
   subtitleWords: SubtitleWord[];
+  resolution?: string;
+  framerate?: number;
   aspectRatio: string;
-}): Promise<{ success: boolean; downloadUrl: string; filename: string }> {
+}): Promise<{ success: boolean; downloadUrl: string; filename: string; resolution?: string; framerate?: number }> {
   const res = await fetch(`${API_BASE}/render`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       videoPath,
       cuts,
+      audioTrackPath,
+      videoAudioVolume,
+      bgAudioVolume,
       colorGrading,
       subtitleTrack: { words: subtitleWords },
+      resolution,
+      framerate,
       aspectRatio,
     }),
   });
@@ -214,6 +229,66 @@ export async function requestRender({
   const data = await res.json();
   if (!data.success) {
     throw new Error(data.error || 'Rendering failed');
+  }
+  return data;
+}
+
+export async function requestSilenceDetection(
+  videoPath: string,
+  noiseDb: number = -30,
+  minDuration: number = 0.4
+): Promise<{
+  success: boolean;
+  totalDuration: number;
+  silencesCount: number;
+  speechCount: number;
+  speechSegments: { start: number; end: number; duration: number; label: string }[];
+  silences: { start: number; end: number; duration: number }[];
+}> {
+  const res = await fetch(`${API_BASE}/ai-autocut`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ videoPath, noiseDb, minDuration }),
+  });
+
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error || 'Silence detection failed');
+  }
+  return data;
+}
+
+export async function generateAIVideo(
+  prompt: string,
+  duration: number = 4.0,
+  aspectRatio: string = '16:9'
+): Promise<any> {
+  const res = await fetch(`${API_BASE}/ai-generate/video`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, duration, aspectRatio }),
+  });
+
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error || 'AI video generation failed');
+  }
+  return data;
+}
+
+export async function generateAIImage(
+  prompt: string,
+  aspectRatio: string = '16:9'
+): Promise<any> {
+  const res = await fetch(`${API_BASE}/ai-generate/image`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, aspectRatio }),
+  });
+
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error || 'AI image generation failed');
   }
   return data;
 }

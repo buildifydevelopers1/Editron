@@ -139,3 +139,5 @@ If you prefer to deploy everything under **one single URL** without managing two
    - The backend already has `cors()` enabled for all origins by default. If you want to restrict it, specify your Vercel domain in `server/index.js`.
 4. **Cloud Object Storage (S3 / Cloudinary / R2)**:
    - For high-volume production, you can replace local `/uploads` storage with AWS S3, Cloudflare R2, or Supabase Storage for unlimited video capacity.
+5. **Debian Base Image (`node:20-bookworm-slim`)**:
+   - Always use Debian 12 **Bookworm** (`node:20-bookworm-slim`). Do not use Debian 11 (*bullseye*), as Debian 11 security repositories have moved to archive mirrors and will fail with `404 Not Found` when fetching `ffmpeg`.

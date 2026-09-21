@@ -163,79 +163,240 @@ export class FFmpegService {
   }
 
   /**
-   * Render final edited video with cuts, color grading adjustments, and subtitles
+   * Real Audio Silence Detection Engine:
+   * Analyzes media waveform to detect silence intervals and extract active speech segments
+   */
+  static async detectSilences(mediaPath, noiseDb = -30, minDuration = 0.4) {
+    return new Promise((resolve, reject) => {
+      const args = [
+        '-i', mediaPath,
+        '-af', `silencedetect=noise=${noiseDb}dB:d=${minDuration}`,
+        '-f', 'null',
+        '-'
+      ];
+
+      const proc = spawn('ffmpeg', args);
+      let stderr = '';
+
+      proc.stderr.on('data', (d) => {
+        stderr += d.toString();
+      });
+
+      proc.on('close', (code) => {
+        // Parse silencedetect outputs from stderr
+        const silences = [];
+        const startRegex = /silence_start: (\d+\.?\d*)/g;
+        const endRegex = /silence_end: (\d+\.?\d*)/g;
+
+        const starts = [];
+        let match;
+        while ((match = startRegex.exec(stderr)) !== null) {
+          starts.push(parseFloat(match[1]));
+        }
+
+        const ends = [];
+        while ((match = endRegex.exec(stderr)) !== null) {
+          ends.push(parseFloat(match[1]));
+        }
+
+        for (let i = 0; i < Math.min(starts.length, ends.length); i++) {
+          silences.push({
+            start: starts[i],
+            end: ends[i],
+            duration: ends[i] - starts[i]
+          });
+        }
+
+        // Get total duration to compute speech segments
+        const durationMatch = stderr.match(/Duration: (\d+):(\d+):(\d+\.\d+)/);
+        let totalDuration = 0;
+        if (durationMatch) {
+          totalDuration = parseFloat(durationMatch[1]) * 3600 + parseFloat(durationMatch[2]) * 60 + parseFloat(durationMatch[3]);
+        }
+
+        // Invert silences into speech segments
+        const speechSegments = [];
+        let cursor = 0;
+        silences.forEach((sil, idx) => {
+          if (sil.start > cursor + 0.2) {
+            speechSegments.push({
+              start: parseFloat(cursor.toFixed(2)),
+              end: parseFloat(sil.start.toFixed(2)),
+              duration: parseFloat((sil.start - cursor).toFixed(2)),
+              label: `Speech Cut ${idx + 1}`
+            });
+          }
+          cursor = sil.end;
+        });
+
+        if (totalDuration > cursor + 0.2) {
+          speechSegments.push({
+            start: parseFloat(cursor.toFixed(2)),
+            end: parseFloat(totalDuration.toFixed(2)),
+            duration: parseFloat((totalDuration - cursor).toFixed(2)),
+            label: `Speech Cut ${speechSegments.length + 1}`
+          });
+        }
+
+        resolve({
+          totalDuration,
+          silences,
+          speechSegments
+        });
+      });
+
+      proc.on('error', (err) => reject(err));
+    });
+  }
+
+  /**
+   * Commercial Multi-Track Timeline Render & Export Compositor:
+   * Supports 1080p/4K 30/60fps, yuv420p QuickTime/iOS compatibility,
+   * multi-track audio mixing (A1 video sound + A2 BGM/SFX), color grading,
+   * aspect-ratio scaling with zero distortion, and subtitle burn-in.
    */
   static async renderTimeline({
     inputVideoPath,
     outputVideoPath,
-    cuts = [], // Array of { start: number, end: number, speed: number }
-    colorGrading = {}, // { temperature, tint, contrast, saturation, lift, gamma, gain }
-    subtitleFile = null, // Path to .srt or .ass file
-    aspectRatio = '16:9', // '16:9', '9:16', '1:1'
+    cuts = [],
+    audioTrackPath = null,
+    videoAudioVolume = 1.0,
+    bgAudioVolume = 0.8,
+    colorGrading = {},
+    subtitleFile = null,
+    resolution = '1080p',
+    framerate = 30,
+    aspectRatio = '16:9',
     onProgress = () => {}
   }) {
-    return new Promise((resolve, reject) => {
-      // Build filter chain
-      const filterComplex = [];
-      let currentStream = '0:v';
+    return new Promise(async (resolve, reject) => {
+      // 1. Calculate Target Dimensions
+      let targetW = 1920;
+      let targetH = 1080;
 
-      // 1. Color Grading Filter
-      // eq filter handles contrast, brightness, saturation
+      if (resolution === '4k') {
+        if (aspectRatio === '9:16') {
+          targetW = 2160;
+          targetH = 3840;
+        } else if (aspectRatio === '1:1') {
+          targetW = 2160;
+          targetH = 2160;
+        } else {
+          targetW = 3840;
+          targetH = 2160;
+        }
+      } else if (resolution === '720p') {
+        if (aspectRatio === '9:16') {
+          targetW = 720;
+          targetH = 1280;
+        } else if (aspectRatio === '1:1') {
+          targetW = 720;
+          targetH = 720;
+        } else {
+          targetW = 1280;
+          targetH = 720;
+        }
+      } else {
+        // Standard 1080p
+        if (aspectRatio === '9:16') {
+          targetW = 1080;
+          targetH = 1920;
+        } else if (aspectRatio === '1:1') {
+          targetW = 1080;
+          targetH = 1080;
+        } else if (aspectRatio === '4:5') {
+          targetW = 1080;
+          targetH = 1350;
+        } else if (aspectRatio === '2.39:1') {
+          targetW = 1920;
+          targetH = 804;
+        } else {
+          targetW = 1920;
+          targetH = 1080;
+        }
+      }
+
+      // Ensure dimensions are even (required by libx264 yuv420p)
+      targetW = Math.floor(targetW / 2) * 2;
+      targetH = Math.floor(targetH / 2) * 2;
+
+      // 2. Build Video Filter Chain
       const contrast = colorGrading.contrast !== undefined ? (colorGrading.contrast / 100) + 1.0 : 1.0;
       const saturation = colorGrading.saturation !== undefined ? (colorGrading.saturation / 100) + 1.0 : 1.0;
       const brightness = colorGrading.brightness !== undefined ? (colorGrading.brightness / 100) : 0.0;
-      
-      // Temperature & Tint via colorchannelmixer or colorbalance
-      // Temp > 0 -> warm (boost red, slight decrease blue)
-      // Temp < 0 -> cool (boost blue, decrease red)
-      const temp = colorGrading.temperature || 0; // -100 to 100
-      const tint = colorGrading.tint || 0; // -100 to 100
-      
+
+      const temp = colorGrading.temperature || 0;
+      const tint = colorGrading.tint || 0;
       const rr = 1.0 + (temp > 0 ? (temp / 200) : 0);
       const bb = 1.0 + (temp < 0 ? (-temp / 200) : 0);
       const gg = 1.0 + (tint > 0 ? (tint / 300) : 0);
 
-      const colorFilters = [
+      const vfParts = [
+        // Scale with aspect ratio preservation and black letterbox/pillarbox padding
+        `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease`,
+        `pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black`,
+        // Commercial Color Grading
         `eq=contrast=${contrast.toFixed(2)}:saturation=${saturation.toFixed(2)}:brightness=${brightness.toFixed(2)}`,
         `colorchannelmixer=rr=${rr.toFixed(3)}:gg=${gg.toFixed(3)}:bb=${bb.toFixed(3)}`
       ];
 
-      // Aspect ratio cropping if 9:16
-      if (aspectRatio === '9:16') {
-        // Center crop to 9:16: crop=ih*9/16:ih:(iw-ih*9/16)/2:0
-        colorFilters.push('crop=ih*9/16:ih');
-      } else if (aspectRatio === '1:1') {
-        colorFilters.push('crop=ih:ih');
-      }
-
-      // Subtitles burn-in if provided
+      // Burn-in Subtitles if available
       if (subtitleFile && fs.existsSync(subtitleFile)) {
-        // Escape backslashes for FFmpeg Windows path
         const escapedSubPath = subtitleFile.replace(/\\/g, '/').replace(/:/g, '\\:');
-        colorFilters.push(`subtitles='${escapedSubPath}'`);
+        vfParts.push(`subtitles='${escapedSubPath}'`);
       }
 
-      const vfString = colorFilters.join(',');
+      const vfString = vfParts.join(',');
 
-      const args = [
-        '-y',
-        '-i', inputVideoPath,
-        '-vf', vfString,
+      // 3. Assemble FFmpeg Inputs & Audio Mixing
+      const args = ['-y', '-i', inputVideoPath];
+      const hasSecondaryAudio = audioTrackPath && fs.existsSync(audioTrackPath);
+
+      if (hasSecondaryAudio) {
+        args.push('-i', audioTrackPath);
+      }
+
+      // Filter complex or simple video filter
+      if (hasSecondaryAudio) {
+        // Multi-track audio mix: input 0 video audio + input 1 background music
+        const filterComplex = [
+          `[0:v]${vfString}[outv]`,
+          `[0:a]volume=${videoAudioVolume.toFixed(2)}[a0]`,
+          `[1:a]volume=${bgAudioVolume.toFixed(2)}[a1]`,
+          `[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[outa]`
+        ].join(';');
+
+        args.push(
+          '-filter_complex', filterComplex,
+          '-map', '[outv]',
+          '-map', '[outa]'
+        );
+      } else {
+        args.push(
+          '-vf', vfString,
+          '-c:a', 'aac',
+          '-b:a', '320k',
+          '-ar', '48000'
+        );
+      }
+
+      // Production Encoding Flags
+      args.push(
         '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-crf', '20',
-        '-c:a', 'aac',
-        '-b:a', '192k',
+        '-pix_fmt', 'yuv420p',
+        '-preset', 'medium',
+        '-crf', '18',
+        '-r', framerate.toString(),
         outputVideoPath
-      ];
+      );
 
       const proc = spawn('ffmpeg', args);
       let stderrData = '';
 
       proc.stderr.on('data', (data) => {
-        stderrData += data.toString();
-        // Parse time for progress
-        const timeMatch = data.toString().match(/time=(\d{2}):(\d{2}):(\d{2}\.\d{2})/);
+        const text = data.toString();
+        stderrData += text;
+        const timeMatch = text.match(/time=(\d{2}):(\d{2}):(\d{2}\.\d{2})/);
         if (timeMatch) {
           const cur = parseFloat(timeMatch[1]) * 3600 + parseFloat(timeMatch[2]) * 60 + parseFloat(timeMatch[3]);
           onProgress({ currentTime: cur });
@@ -244,7 +405,12 @@ export class FFmpegService {
 
       proc.on('close', (code) => {
         if (code === 0) {
-          resolve({ success: true, outputPath: outputVideoPath });
+          resolve({
+            success: true,
+            outputPath: outputVideoPath,
+            resolution: `${targetW}x${targetH}`,
+            framerate
+          });
         } else {
           reject(new Error(`FFmpeg exited with code ${code}: ${stderrData.slice(-500)}`));
         }

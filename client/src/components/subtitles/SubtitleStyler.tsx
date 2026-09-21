@@ -6,7 +6,8 @@ import {
   Palette,
   Layers,
   MoveVertical,
-  Play
+  Play,
+  Download
 } from 'lucide-react';
 import { SubtitleStyle, SubtitleWord } from '../../types';
 
@@ -114,6 +115,67 @@ export const SubtitleStyler: React.FC<SubtitleStylerProps> = ({
     onSubtitlesChange(
       subtitles.map((w) => (w.id === id ? { ...w, word: newText } : w))
     );
+  };
+
+  const exportSRT = () => {
+    if (subtitles.length === 0) return;
+    let srt = '';
+    const groupSize = 4;
+    let index = 1;
+    for (let i = 0; i < subtitles.length; i += groupSize) {
+      const chunk = subtitles.slice(i, i + groupSize);
+      const start = chunk[0].start;
+      const end = chunk[chunk.length - 1].end;
+      const text = chunk.map((w) => w.word).join(' ');
+
+      const fmt = (s: number) => {
+        const hrs = Math.floor(s / 3600).toString().padStart(2, '0');
+        const mins = Math.floor((s % 3600) / 60).toString().padStart(2, '0');
+        const secs = Math.floor(s % 60).toString().padStart(2, '0');
+        const ms = Math.floor((s % 1) * 1000).toString().padStart(3, '0');
+        return `${hrs}:${mins}:${secs},${ms}`;
+      };
+
+      srt += `${index++}\n${fmt(start)} --> ${fmt(end)}\n${text}\n\n`;
+    }
+
+    const blob = new Blob([srt], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'subtitles.srt';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportVTT = () => {
+    if (subtitles.length === 0) return;
+    let vtt = 'WEBVTT\n\n';
+    const groupSize = 4;
+    for (let i = 0; i < subtitles.length; i += groupSize) {
+      const chunk = subtitles.slice(i, i + groupSize);
+      const start = chunk[0].start;
+      const end = chunk[chunk.length - 1].end;
+      const text = chunk.map((w) => w.word).join(' ');
+
+      const fmt = (s: number) => {
+        const hrs = Math.floor(s / 3600).toString().padStart(2, '0');
+        const mins = Math.floor((s % 3600) / 60).toString().padStart(2, '0');
+        const secs = Math.floor(s % 60).toString().padStart(2, '0');
+        const ms = Math.floor((s % 1) * 1000).toString().padStart(3, '0');
+        return `${hrs}:${mins}:${secs}.${ms}`;
+      };
+
+      vtt += `${fmt(start)} --> ${fmt(end)}\n${text}\n\n`;
+    }
+
+    const blob = new Blob([vtt], { type: 'text/vtt;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'subtitles.vtt';
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -244,9 +306,31 @@ export const SubtitleStyler: React.FC<SubtitleStylerProps> = ({
               Click any word to seek playhead directly. Edit words inline.
             </p>
           </div>
-          <span className="text-xs font-mono text-gray-400 bg-resolve-900 px-2 py-1 rounded border border-resolve-800">
-            {subtitles.length} words detected
-          </span>
+          <div className="flex items-center space-x-2">
+            <span className="text-xs font-mono text-gray-400 bg-resolve-900 px-2 py-1 rounded border border-resolve-800">
+              {subtitles.length} words detected
+            </span>
+            {subtitles.length > 0 && (
+              <>
+                <button
+                  onClick={exportSRT}
+                  title="Export standard SRT subtitle file"
+                  className="flex items-center space-x-1 px-2 py-1 text-xs font-semibold bg-resolve-800 hover:bg-resolve-700 text-gray-200 rounded border border-resolve-700 transition"
+                >
+                  <Download className="w-3 h-3 text-resolve-orange" />
+                  <span>.SRT</span>
+                </button>
+                <button
+                  onClick={exportVTT}
+                  title="Export WebVTT subtitle file"
+                  className="flex items-center space-x-1 px-2 py-1 text-xs font-semibold bg-resolve-800 hover:bg-resolve-700 text-gray-200 rounded border border-resolve-700 transition"
+                >
+                  <Download className="w-3 h-3 text-cyan-400" />
+                  <span>.VTT</span>
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Word Grid / Stream */}

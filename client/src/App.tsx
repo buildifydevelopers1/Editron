@@ -36,6 +36,7 @@ import {
   fetchConfig,
   generatePhotosToReel,
   requestAIEdits,
+  requestSilenceDetection,
   requestTranscription,
   requestVisionAnalysis,
   searchTrendingSongs,
@@ -432,6 +433,42 @@ export function App() {
         }
       } catch (err) {
         console.warn('Trending search fallback:', err);
+      }
+    }
+
+    // Check if user requested auto-cutting silences / jump cuts
+    if (
+      p.includes('silence') ||
+      p.includes('auto-cut') ||
+      p.includes('autocut') ||
+      p.includes('jump cut') ||
+      p.includes('remove pause') ||
+      p.includes('trim silence')
+    ) {
+      setProcessingStatus('Running FFmpeg precision silence detection filter...');
+      try {
+        const result = await requestSilenceDetection(videoPath);
+        if (result && result.speechSegments && result.speechSegments.length > 0) {
+          const cutClips: VideoClip[] = result.speechSegments.map((seg, i) => ({
+            id: `speech-cut-${i}-${Date.now()}`,
+            name: seg.label || `Speech Part ${i + 1}`,
+            trackId: 'v1',
+            start: seg.start,
+            end: seg.end,
+            sourceStart: seg.start,
+            sourceEnd: seg.end,
+            speed: 1.0,
+            label: `Speech Part ${i + 1}`,
+          }));
+          setClips(cutClips);
+          setSelectedClipId(cutClips[0]?.id || null);
+          setAiSummary(`Auto-cut complete: Removed ${result.silencesCount} silent pauses, preserved ${result.speechCount} active speech segments.`);
+          setIsProcessing(false);
+          setProcessingStatus('');
+          return;
+        }
+      } catch (err: any) {
+        console.warn('Auto-cut silence detection fallback:', err);
       }
     }
 
@@ -873,6 +910,7 @@ export function App() {
         colorGrading={colorGrading}
         subtitles={subtitles}
         aspectRatio={aspectRatio}
+        audioTrackPath={reelAudioUrl ? (reelAudioUrl.startsWith('/') ? reelAudioUrl.slice(1) : reelAudioUrl) : null}
       />
     </div>
   );

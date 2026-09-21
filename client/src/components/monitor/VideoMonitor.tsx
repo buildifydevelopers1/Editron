@@ -10,7 +10,9 @@ import {
   Minimize2,
   Crop,
   Repeat,
-  Tv
+  Tv,
+  Sparkles,
+  Activity
 } from 'lucide-react';
 import {
   AspectRatio,
@@ -22,6 +24,8 @@ import {
   VideoEffect,
   VideoTransition,
 } from '../../types';
+import { useVideoViewport } from '../../hooks/useVideoViewport';
+import { audioEngine } from '../../services/audioEngine';
 
 interface VideoMonitorProps {
   videoUrl: string;
@@ -62,10 +66,16 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const stageContainerRef = useRef<HTMLDivElement>(null);
+
   const [isMuted, setIsMuted] = useState(false);
   const [showSafeZones, setShowSafeZones] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isAudioUnlocked, setIsAudioUnlocked] = useState(audioEngine.isUnlocked);
+  const [vuLevels, setVuLevels] = useState<{ left: number; right: number }>({ left: 0, right: 0 });
+
+  // Precision Responsive Viewport Rectangle (Exact Letterbox/Pillarbox Bounding Box)
+  const viewportRect = useVideoViewport(stageContainerRef, aspectRatio);
 
   // Active clip at current time
   const activeClip = clips.find(
@@ -74,29 +84,72 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
     (c) => currentTime >= c.start && currentTime < c.end
   );
 
+  // Subscribe to Web Audio Engine unlock state
+  useEffect(() => {
+    return audioEngine.onUnlockChange(setIsAudioUnlocked);
+  }, []);
+
+  // Sync master volume with Web Audio Engine
+  useEffect(() => {
+    audioEngine.setMasterVolume(isMuted ? 0 : 1.0, isMuted);
+  }, [isMuted]);
+
+  // Connect media elements to Web Audio Engine on mount / ref availability
+  useEffect(() => {
+    if (videoRef.current) {
+      audioEngine.connectMediaElement(videoRef.current);
+    }
+    if (audioRef.current) {
+      audioEngine.connectMediaElement(audioRef.current);
+    }
+  }, [videoUrl, audioUrl]);
+
+  // Live VU Meter Polling Loop (only when playing)
+  useEffect(() => {
+    if (!isPlaying) {
+      setVuLevels({ left: 0, right: 0 });
+      return;
+    }
+
+    let rafId: number;
+    const pollVU = () => {
+      const { left, right } = audioEngine.getPeakLevels();
+      setVuLevels({ left, right });
+      rafId = requestAnimationFrame(pollVU);
+    };
+    rafId = requestAnimationFrame(pollVU);
+
+    return () => cancelAnimationFrame(rafId);
+  }, [isPlaying]);
+
   // Sync video element with external playback state
   useEffect(() => {
     if (!videoRef.current) return;
     if (isPlaying && videoRef.current.paused) {
-      videoRef.current.play().catch(() => {});
+      videoRef.current.play().catch(() => {
+        // Autoplay policy prevented playback, unlock required
+        setIsAudioUnlocked(false);
+      });
     } else if (!isPlaying && !videoRef.current.paused) {
       videoRef.current.pause();
     }
   }, [isPlaying]);
 
-  // Sync seek time if difference exceeds threshold (prevent micro-jitter)
+  // Frame-accurate seek synchronization (<0.04s threshold prevents jitter while maintaining frame sync)
   useEffect(() => {
     if (!videoRef.current) return;
-    if (Math.abs(videoRef.current.currentTime - currentTime) > 0.25) {
+    if (Math.abs(videoRef.current.currentTime - currentTime) > 0.04) {
       videoRef.current.currentTime = currentTime;
     }
   }, [currentTime]);
 
-  // Sync audio element with external playback state
+  // Sync secondary audio element with external playback state
   useEffect(() => {
     if (!audioRef.current || !audioUrl) return;
     if (isPlaying && audioRef.current.paused) {
-      audioRef.current.play().catch(() => {});
+      audioRef.current.play().catch(() => {
+        setIsAudioUnlocked(false);
+      });
     } else if (!isPlaying && !audioRef.current.paused) {
       audioRef.current.pause();
     }
@@ -105,26 +158,26 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
   // Sync audio seek time
   useEffect(() => {
     if (!audioRef.current || !audioUrl) return;
-    if (Math.abs(audioRef.current.currentTime - currentTime) > 0.25) {
+    if (Math.abs(audioRef.current.currentTime - currentTime) > 0.04) {
       audioRef.current.currentTime = currentTime;
     }
   }, [currentTime, audioUrl]);
 
-  // If playing an image montage or active clip is an image, tick playhead timer
+  // Image montage playback driver (ticks playhead smoothly if active media is an image sequence)
   useEffect(() => {
     if (!isPlaying) return;
     const isImagePlaying = activeClip?.type === 'image' || (!videoUrl && clips.length > 0);
     if (!isImagePlaying) return;
 
     const timer = setInterval(() => {
-      const nextTime = currentTime + 0.05;
+      const nextTime = currentTime + 0.033;
       if (nextTime >= duration) {
         onSeek(0);
         onPlayPause();
       } else {
         onSeek(nextTime);
       }
-    }, 50);
+    }, 33);
 
     return () => clearInterval(timer);
   }, [isPlaying, currentTime, duration, activeClip, videoUrl, clips, onSeek, onPlayPause]);
@@ -143,11 +196,9 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
   const contrast = (colorGrading.contrast / 100) + 1.0;
   const saturation = (colorGrading.saturation / 100) + 1.0;
   const brightness = (colorGrading.brightness / 100) + 1.0;
-  
-  // Temperature & Tint simulation
   const temp = colorGrading.temperature;
   const sepia = temp > 0 ? (temp / 200) : 0;
-  const hueRotate = colorGrading.tint * 0.7; // slight green-magenta rotation
+  const hueRotate = colorGrading.tint * 0.7;
 
   // Active OpenFX Effects
   const vignette = effects.find((e) => e.type === 'vignette' && e.enabled);
@@ -206,45 +257,30 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
   const currentWords = subtitles.filter(
     (w) => currentTime >= w.start - 0.1 && currentTime <= w.end + 0.3
   );
-
-  // Group of words around active time (3-5 words context)
   const activeWord = subtitles.find(
     (w) => currentTime >= w.start && currentTime <= w.end
   );
 
   const toggleFullscreen = () => {
-    if (!containerRef.current) return;
+    const el = stageContainerRef.current;
+    if (!el) return;
+
     if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
+      el.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
     } else {
-      document.exitFullscreen().catch(() => {});
-      setIsFullscreen(false);
+      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
     }
   };
 
-  // Determine container aspect ratio class
-  const getAspectRatioClasses = () => {
-    switch (aspectRatio) {
-      case '9:16':
-        return 'aspect-[9/16] max-h-[75vh]';
-      case '1:1':
-        return 'aspect-square max-h-[75vh]';
-      case '4:5':
-        return 'aspect-[4/5] max-h-[75vh]';
-      case '2.39:1':
-        return 'aspect-[2.39/1] max-h-[75vh]';
-      case '16:9':
-      default:
-        return 'aspect-video max-h-[75vh]';
+  const handleManualAudioUnlock = async () => {
+    const success = await audioEngine.unlock();
+    if (success && isPlaying && videoRef.current) {
+      videoRef.current.play().catch(() => {});
     }
   };
 
   return (
-    <div
-      ref={containerRef}
-      className="flex-1 flex flex-col bg-resolve-950 border-r border-resolve-800/80 relative overflow-hidden"
-    >
+    <div className="flex-1 flex flex-col bg-resolve-950 border-r border-resolve-800/80 relative overflow-hidden">
       {/* Top Monitor Bar */}
       <div className="h-8 bg-resolve-900 border-b border-resolve-800 flex items-center justify-between px-3 text-xs text-gray-400 select-none">
         <div className="flex items-center space-x-3">
@@ -273,8 +309,35 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
           </div>
         </div>
 
-        {/* Timecode HUD */}
+        {/* Live VU Meter & Timecode HUD */}
         <div className="flex items-center space-x-3 font-mono">
+          {/* Hardware VU Peak Meter */}
+          <div className="flex items-center space-x-1.5 bg-resolve-950 px-2 py-0.5 rounded border border-resolve-800" title="Master Audio Peak Meter">
+            <Activity className="w-3 h-3 text-gray-500" />
+            <div className="flex items-center space-x-0.5 h-3.5">
+              {/* Left Channel */}
+              <div className="w-1.5 h-full bg-resolve-800 rounded-sm overflow-hidden flex flex-col justify-end">
+                <div
+                  className="w-full transition-all duration-75"
+                  style={{
+                    height: `${Math.round(vuLevels.left * 100)}%`,
+                    backgroundColor: vuLevels.left > 0.85 ? '#ef4444' : vuLevels.left > 0.6 ? '#eab308' : '#22c55e'
+                  }}
+                />
+              </div>
+              {/* Right Channel */}
+              <div className="w-1.5 h-full bg-resolve-800 rounded-sm overflow-hidden flex flex-col justify-end">
+                <div
+                  className="w-full transition-all duration-75"
+                  style={{
+                    height: `${Math.round(vuLevels.right * 100)}%`,
+                    backgroundColor: vuLevels.right > 0.85 ? '#ef4444' : vuLevels.right > 0.6 ? '#eab308' : '#22c55e'
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
           <button
             onClick={() => setShowSafeZones(!showSafeZones)}
             className={`px-1.5 py-0.5 rounded text-[11px] border transition ${
@@ -297,13 +360,32 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
         </div>
       </div>
 
-      {/* Main Viewport Stage */}
-      <div className="flex-1 flex items-center justify-center p-3 relative bg-[#09090b] overflow-hidden">
+      {/* Main Viewport Stage: Dynamic Letterbox & Pillarbox Presentation */}
+      <div
+        ref={stageContainerRef}
+        className="flex-1 flex items-center justify-center p-2 relative bg-[#070709] overflow-hidden"
+      >
+        {/* Autoplay Unlock Notice Badge */}
+        {!isAudioUnlocked && (
+          <button
+            onClick={handleManualAudioUnlock}
+            className="absolute top-4 z-40 bg-resolve-orange text-black px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center space-x-1.5 shadow-xl hover:bg-resolve-orange-hover transition animate-bounce"
+            title="Browser requires interaction to enable audio output"
+          >
+            <VolumeX className="w-3.5 h-3.5" />
+            <span>Click to Enable Sound</span>
+          </button>
+        )}
+
+        {/* Video Canvas Container (Guaranteed Exact Aspect Ratio, Zero Cropping) */}
         <div
-          className={`relative flex items-center justify-center transition-all duration-200 shadow-2xl rounded overflow-hidden border border-resolve-800 ${getAspectRatioClasses()}`}
-          style={{ width: '100%' }}
+          className="relative flex items-center justify-center transition-all duration-150 shadow-2xl rounded overflow-hidden border border-resolve-800/80 bg-black"
+          style={{
+            width: `${viewportRect.width}px`,
+            height: `${viewportRect.height}px`,
+          }}
         >
-          {/* Audio BGM Track (if attitude reel or background music present) */}
+          {/* Audio BGM Track (Secondary Audio Channel) */}
           {audioUrl && (
             <audio
               ref={audioRef}
@@ -312,12 +394,12 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
             />
           )}
 
-          {/* Main Visual Surface: Photo Slide or Video */}
+          {/* Visual Surface: Photo Slide or Video Surface */}
           {activeClip?.type === 'image' && activeClip?.imageUrl ? (
             <img
               src={activeClip.imageUrl}
               alt={activeClip.name}
-              className="w-full h-full object-cover pointer-events-none transition-transform duration-100 select-none"
+              className="w-full h-full object-contain pointer-events-none select-none transition-transform duration-100"
               style={{
                 filter: videoFilterStyle,
                 transform: `scale(${finalScale * (1.0 + ((currentTime - activeClip.start) / Math.max(0.1, activeClip.end - activeClip.start)) * 0.08)}) translate(${finalPosX}px, ${finalPosY}px) rotate(${finalRot}deg)`,
@@ -342,7 +424,6 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
           )}
 
           {/* TRANSITION OVERLAYS */}
-          {/* Dip to White (Camera Flash) */}
           {activeTransition?.type === 'dip_white' && (
             <div
               className="absolute inset-0 bg-white pointer-events-none z-30 transition-opacity"
@@ -350,7 +431,6 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
             />
           )}
 
-          {/* Dip to Black */}
           {activeTransition?.type === 'dip_black' && (
             <div
               className="absolute inset-0 bg-black pointer-events-none z-30 transition-opacity"
@@ -358,7 +438,6 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
             />
           )}
 
-          {/* Film Burn / Light Leak */}
           {activeTransition?.type === 'film_burn' && (
             <div
               className="absolute inset-0 pointer-events-none z-30 mix-blend-screen"
@@ -369,7 +448,6 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
             />
           )}
 
-          {/* Cyber Glitch Tearing */}
           {activeTransition?.type === 'glitch' && (
             <div
               className="absolute inset-0 pointer-events-none z-30 mix-blend-difference opacity-75"
@@ -381,7 +459,6 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
           )}
 
           {/* OPENFX EFFECT OVERLAYS */}
-          {/* Cinematic Vignette */}
           {vignette && (
             <div
               className="absolute inset-0 pointer-events-none z-20"
@@ -391,108 +468,97 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
             />
           )}
 
-          {/* 35mm Film Grain */}
           {grain && (
             <div
-              className="absolute inset-0 pointer-events-none z-20 mix-blend-overlay"
+              className="absolute inset-0 pointer-events-none z-20 mix-blend-overlay opacity-50"
               style={{
-                backgroundImage: 'radial-gradient(rgba(255,255,255,0.4) 1px, transparent 0)',
-                backgroundSize: '3px 3px',
-                opacity: grain.intensity / 150,
+                backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noiseFilter\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.85\' numOctaves=\'3\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noiseFilter)\'/%3E%3C/svg%3E")',
+                opacity: (grain.intensity / 100) * 0.45,
               }}
             />
           )}
 
-          {/* Retro VHS Scanlines */}
           {vhs && (
             <div
-              className="absolute inset-0 pointer-events-none z-20"
+              className="absolute inset-0 pointer-events-none z-20 opacity-30"
               style={{
-                background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.4) 0px, transparent 1px, transparent 2px)',
-                opacity: vhs.intensity / 100,
+                background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.4) 0px, transparent 1px, transparent 2px, rgba(0,0,0,0.4) 3px)',
               }}
             />
           )}
 
-          {/* 2.39:1 Cinema Letterbox Black Bars */}
-          {letterbox && (
-            <div className="absolute inset-0 pointer-events-none z-25 flex flex-col justify-between">
-              <div className="w-full bg-black" style={{ height: `${(letterbox.intensity / 100) * 12}%` }} />
-              <div className="w-full bg-black" style={{ height: `${(letterbox.intensity / 100) * 12}%` }} />
-            </div>
-          )}
-
-          {/* RGB Split Chromatic Aberration Shadow */}
           {rgbSplit && (
             <div
-              className="absolute inset-0 pointer-events-none z-20 mix-blend-screen"
+              className="absolute inset-0 pointer-events-none z-20 mix-blend-screen opacity-40"
               style={{
-                boxShadow: `inset ${(rgbSplit.intensity / 8).toFixed(0)}px 0 0 rgba(255,0,0,0.6), inset -${(rgbSplit.intensity / 8).toFixed(0)}px 0 0 rgba(0,255,255,0.6)`,
+                transform: `translate(${(rgbSplit.intensity / 35).toFixed(1)}px, 0)`,
+                filter: 'drop-shadow(-2px 0 red) drop-shadow(2px 0 cyan)',
               }}
             />
           )}
 
-          {/* Safe Margins / Frame Overlays */}
-          {showSafeZones && (
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              {/* 90% Action Safe */}
-              <div className="w-[90%] h-[90%] border border-cyan-500/30 border-dashed absolute" />
-              {/* 80% Title Safe */}
-              <div className="w-[80%] h-[80%] border border-amber-500/30 border-dashed absolute" />
-              {/* Center Crosshair */}
-              <div className="w-4 h-4 border-t border-l border-white/40 absolute" />
+          {letterbox && (
+            <div className="absolute inset-0 pointer-events-none z-25 flex flex-col justify-between">
+              <div className="w-full bg-black" style={{ height: '11%' }} />
+              <div className="w-full bg-black" style={{ height: '11%' }} />
             </div>
           )}
 
-          {/* Dynamic Subtitle Engine Overlay */}
-          {subtitles.length > 0 && (
-            <div
-              className="absolute left-0 right-0 px-6 pointer-events-none flex flex-wrap justify-center items-center text-center transition-all z-20"
-              style={{
-                bottom: `${subtitleStyle.positionY || 16}%`,
-              }}
-            >
-              {/* Render either current window of words or active segment */}
-              {currentWords.length > 0 ? (
-                <div
-                  className={`inline-flex flex-wrap justify-center items-center gap-1.5 px-3 py-1.5 rounded-lg ${
-                    subtitleStyle.preset === 'boxed' ? 'bg-black/70 backdrop-blur-sm' : ''
-                  }`}
-                  style={{
-                    fontFamily: subtitleStyle.fontFamily,
-                    fontSize: `${subtitleStyle.fontSize}px`,
-                    fontWeight: 900,
-                    textTransform: subtitleStyle.textCase === 'uppercase' ? 'uppercase' : 'none',
-                    letterSpacing: subtitleStyle.preset === 'hormozi' ? '0.04em' : 'normal',
-                  }}
-                >
-                  {currentWords.map((word) => {
-                    const isCurrent = activeWord?.id === word.id;
-                    const animClass =
-                      isCurrent && subtitleStyle.animation === 'bounce'
-                        ? 'anim-bounce'
-                        : isCurrent && subtitleStyle.animation === 'pop'
-                        ? 'anim-pop'
-                        : '';
+          {/* Safe Margins Overlay (Action Safe 90%, Title Safe 80%) */}
+          {showSafeZones && (
+            <div className="absolute inset-0 pointer-events-none z-25">
+              <div className="absolute inset-[5%] border border-yellow-400/40">
+                <span className="text-[9px] text-yellow-400/70 absolute top-1 left-1">90% Action Safe</span>
+              </div>
+              <div className="absolute inset-[10%] border border-cyan-400/40">
+                <span className="text-[9px] text-cyan-400/70 absolute top-1 left-1">80% Title Safe</span>
+              </div>
+              <div className="absolute top-1/2 left-0 right-0 h-px bg-white/10" />
+              <div className="absolute left-1/2 top-0 bottom-0 w-px bg-white/10" />
+            </div>
+          )}
 
-                    return (
-                      <span
-                        key={word.id}
-                        className={`transition-colors duration-75 ${animClass}`}
-                        style={{
-                          color: isCurrent ? subtitleStyle.highlightColor : subtitleStyle.textColor,
-                          WebkitTextStroke: `${subtitleStyle.strokeWidth}px ${subtitleStyle.strokeColor}`,
-                          textShadow: isCurrent
-                            ? `0 0 12px ${subtitleStyle.highlightColor}66, 0 2px 4px rgba(0,0,0,0.9)`
-                            : '0 2px 4px rgba(0,0,0,0.9)',
-                        }}
-                      >
-                        {word.word}
-                      </span>
-                    );
-                  })}
-                </div>
-              ) : null}
+          {/* DYNAMIC SUBTITLES OVERLAY */}
+          {currentWords.length > 0 && (
+            <div
+              className="absolute left-0 right-0 flex justify-center items-center pointer-events-none z-30 px-4"
+              style={{ bottom: `${subtitleStyle.positionY}%` }}
+            >
+              <div
+                className={`flex flex-wrap justify-center items-center gap-1.5 font-bold tracking-wide transition-all ${
+                  subtitleStyle.textCase === 'uppercase' ? 'uppercase' : ''
+                }`}
+                style={{
+                  fontFamily: subtitleStyle.fontFamily,
+                  fontSize: `${Math.max(16, Math.min(36, viewportRect.width / 22))}px`,
+                }}
+              >
+                {currentWords.map((word) => {
+                  const isCurrent = activeWord?.id === word.id;
+                  const animClass =
+                    isCurrent && subtitleStyle.animation === 'bounce'
+                      ? 'anim-bounce'
+                      : isCurrent && subtitleStyle.animation === 'pop'
+                      ? 'anim-pop'
+                      : '';
+
+                  return (
+                    <span
+                      key={word.id}
+                      className={`transition-colors duration-75 ${animClass}`}
+                      style={{
+                        color: isCurrent ? subtitleStyle.highlightColor : subtitleStyle.textColor,
+                        WebkitTextStroke: `${subtitleStyle.strokeWidth}px ${subtitleStyle.strokeColor}`,
+                        textShadow: isCurrent
+                          ? `0 0 12px ${subtitleStyle.highlightColor}66, 0 2px 4px rgba(0,0,0,0.9)`
+                          : '0 2px 4px rgba(0,0,0,0.9)',
+                      }}
+                    >
+                      {word.word}
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
@@ -548,7 +614,7 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
           <button
             onClick={() => setIsMuted(!isMuted)}
             className="p-1.5 hover:text-white hover:bg-resolve-800 rounded transition"
-            title="Mute / Unmute"
+            title={isMuted ? 'Unmute' : 'Mute'}
           >
             {isMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-gray-300" />}
           </button>
@@ -556,7 +622,7 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
           <button
             onClick={toggleFullscreen}
             className="p-1.5 hover:text-white hover:bg-resolve-800 rounded transition"
-            title="Fullscreen"
+            title="Toggle Native Fullscreen"
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>

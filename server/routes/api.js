@@ -7,6 +7,7 @@ import { config } from '../config.js';
 import { AIService } from '../services/ai.js';
 import { FFmpegService } from '../services/ffmpeg.js';
 import { TrendingAudioService } from '../services/trending-audio.js';
+import { AIDiffusionService } from '../services/ai-diffusion.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,6 +30,38 @@ const storage = multer.diskStorage({
   }
 });
 const upload = multer({ storage });
+
+/**
+ * Resolves a client-supplied media path into an existing absolute file path
+ */
+function resolveMediaFilePath(filePath) {
+  if (!filePath || typeof filePath !== 'string') return null;
+  // If absolute and exists
+  if (path.isAbsolute(filePath) && fs.existsSync(filePath)) {
+    return filePath;
+  }
+  // If relative to cwd and exists
+  if (fs.existsSync(filePath)) {
+    return path.resolve(filePath);
+  }
+  // Try directly inside uploadDir with leading slashes / 'uploads/' stripped
+  const cleanRelative = filePath.replace(/^[\/\\]*(uploads[\/\\])?/, '');
+  const inUploadDir = path.join(uploadDir, cleanRelative);
+  if (fs.existsSync(inUploadDir)) {
+    return inUploadDir;
+  }
+  // Try basename in uploadDir
+  const baseInUpload = path.join(uploadDir, path.basename(filePath));
+  if (fs.existsSync(baseInUpload)) {
+    return baseInUpload;
+  }
+  // Try relative from project root
+  const inProjectRoot = path.resolve(__dirname, '../../', cleanRelative);
+  if (fs.existsSync(inProjectRoot)) {
+    return inProjectRoot;
+  }
+  return null;
+}
 
 /**
  * Health Check & Capabilities
@@ -92,12 +125,13 @@ router.post('/config', (req, res) => {
 router.post('/vision-analyze', async (req, res) => {
   try {
     const { videoPath, duration, prompt } = req.body;
-    if (!videoPath || !fs.existsSync(videoPath)) {
+    const resolvedVideoPath = resolveMediaFilePath(videoPath);
+    if (!resolvedVideoPath) {
       return res.status(400).json({ error: 'Valid videoPath is required for vision analysis' });
     }
 
     // 1. Extract keyframes across the video
-    const frames = await FFmpegService.extractKeyframes(videoPath, duration || 12, 4, uploadDir);
+    const frames = await FFmpegService.extractKeyframes(resolvedVideoPath, duration || 12, 4, uploadDir);
 
     // 2. Call multimodal vision AI
     const analysis = await AIService.analyzeVideoVision({
@@ -191,7 +225,7 @@ router.get('/assets/library', (req, res) => {
       type: 'audio',
       duration: 0.8,
       thumbnail: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80',
-      url: '',
+      url: '/uploads/elevated_attitude_beat.mp3',
       description: 'Fast-paced transition whoosh for scene cuts'
     },
     {
@@ -201,7 +235,7 @@ router.get('/assets/library', (req, res) => {
       type: 'audio',
       duration: 1.2,
       thumbnail: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&q=80',
-      url: '',
+      url: '/uploads/baller_desi_trap.mp3',
       description: 'Classic record stop effect for funny interruptions'
     },
     {
@@ -211,7 +245,7 @@ router.get('/assets/library', (req, res) => {
       type: 'audio',
       duration: 2.0,
       thumbnail: 'https://images.unsplash.com/photo-1465847899084-d164df4dedc6?w=300&q=80',
-      url: '',
+      url: '/uploads/dafa_406_anthem.mp3',
       description: 'Dramatic bass drop impact for epic reveals'
     },
     {
@@ -221,7 +255,7 @@ router.get('/assets/library', (req, res) => {
       type: 'audio',
       duration: 15.0,
       thumbnail: 'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=300&q=80',
-      url: '',
+      url: '/uploads/big_dawgs_cut.mp3',
       description: 'Smooth background study / tutorial music track'
     }
   ];
@@ -363,19 +397,11 @@ router.post('/photos-to-reel', async (req, res) => {
   try {
     const { photos = [], prompt = 'attitude reel', songId = 'trend-hindi-1' } = req.body;
     
-    // If no photos uploaded, use curated high-fashion / attitude demo photos
-    const photoList = photos.length > 0 ? photos : [
-      { id: 'p-1', url: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=600&q=80', name: 'Alpha Stance' },
-      { id: 'p-2', url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&q=80', name: 'Cold Gaze' },
-      { id: 'p-3', url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=600&q=80', name: 'Unstoppable' },
-      { id: 'p-4', url: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=600&q=80', name: 'Boss Walk' },
-      { id: 'p-5', url: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=600&q=80', name: 'Raw Energy' },
-      { id: 'p-6', url: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=600&q=80', name: 'Golden Hour Silhouette' },
-      { id: 'p-7', url: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=600&q=80', name: 'Rule The Game' },
-      { id: 'p-8', url: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=600&q=80', name: 'Silent Power' },
-      { id: 'p-9', url: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=600&q=80', name: 'Next Level' },
-      { id: 'p-10', url: 'https://images.unsplash.com/photo-1488161628813-04466f872be2?w=600&q=80', name: 'Final Drop' },
-    ];
+    // Require real uploaded user photos (no mock bypass)
+    if (!photos || photos.length < 2) {
+      return res.status(400).json({ error: 'Please upload at least 2 real photos to compile a custom attitude reel montage.' });
+    }
+    const photoList = photos;
 
     const catalog = TrendingAudioService.getTrendingCatalog();
     const song = catalog.find(s => s.id === songId) || catalog[0];
@@ -570,8 +596,9 @@ router.post('/upload', upload.single('video'), async (req, res) => {
 router.post('/transcribe', async (req, res) => {
   try {
     const { audioPath, apiKey, baseUrl, model } = req.body;
+    const resolvedAudioPath = resolveMediaFilePath(audioPath) || audioPath;
     const transcript = await AIService.transcribeAudio({
-      audioFilePath: audioPath,
+      audioFilePath: resolvedAudioPath,
       apiKey,
       baseUrl,
       model
@@ -611,15 +638,98 @@ router.post('/ai-edit', async (req, res) => {
 });
 
 /**
- * Render & Export Timeline
+ * Real Audio Silence Detection & Speech Auto-Cut Engine
+ */
+router.post('/ai-autocut', async (req, res) => {
+  try {
+    const { videoPath, noiseDb = -30, minDuration = 0.4 } = req.body;
+    const resolvedVideoPath = resolveMediaFilePath(videoPath);
+    if (!resolvedVideoPath) {
+      return res.status(400).json({ error: 'Valid videoPath is required for silence detection' });
+    }
+
+    const result = await FFmpegService.detectSilences(resolvedVideoPath, noiseDb, minDuration);
+    res.json({
+      success: true,
+      totalDuration: result.totalDuration,
+      silencesCount: result.silences.length,
+      speechCount: result.speechSegments.length,
+      speechSegments: result.speechSegments,
+      silences: result.silences
+    });
+  } catch (err) {
+    console.error('Silence detection error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * AI Diffusion Video Generation
+ */
+router.post('/ai-generate/video', async (req, res) => {
+  try {
+    const { prompt, duration = 4.0, aspectRatio = '16:9', provider = 'auto', apiKey } = req.body;
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+    const result = await AIDiffusionService.generateVideoFromPrompt({
+      prompt,
+      duration,
+      aspectRatio,
+      provider,
+      apiKey
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('AI video generation error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * AI Diffusion Image Generation
+ */
+router.post('/ai-generate/image', async (req, res) => {
+  try {
+    const { prompt, aspectRatio = '16:9', apiKey } = req.body;
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+    const result = await AIDiffusionService.generateImageFromPrompt({
+      prompt,
+      aspectRatio,
+      apiKey
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('AI image generation error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Commercial Render & Export Master Pipeline
  */
 router.post('/render', async (req, res) => {
   try {
-    const { videoPath, cuts, colorGrading, subtitleTrack, aspectRatio = '16:9' } = req.body;
+    const {
+      videoPath,
+      cuts,
+      audioTrackPath,
+      videoAudioVolume = 1.0,
+      bgAudioVolume = 0.8,
+      colorGrading,
+      subtitleTrack,
+      resolution = '1080p',
+      framerate = 30,
+      aspectRatio = '16:9'
+    } = req.body;
 
-    if (!videoPath || !fs.existsSync(videoPath)) {
+    const resolvedVideoPath = resolveMediaFilePath(videoPath);
+    if (!resolvedVideoPath) {
       return res.status(400).json({ error: 'Valid videoPath is required for rendering' });
     }
+    const resolvedAudioTrackPath = audioTrackPath ? resolveMediaFilePath(audioTrackPath) : null;
 
     const outputFileName = `render_${Date.now()}.mp4`;
     const outputPath = path.join(outputDir, outputFileName);
@@ -652,20 +762,27 @@ router.post('/render', async (req, res) => {
       fs.writeFileSync(subtitleFile, srtContent, 'utf-8');
     }
 
-    await FFmpegService.renderTimeline({
-      inputVideoPath: videoPath,
+    const renderResult = await FFmpegService.renderTimeline({
+      inputVideoPath: resolvedVideoPath,
       outputVideoPath: outputPath,
       cuts: cuts || [],
+      audioTrackPath: resolvedAudioTrackPath,
+      videoAudioVolume: parseFloat(videoAudioVolume) || 1.0,
+      bgAudioVolume: parseFloat(bgAudioVolume) || 0.8,
       colorGrading: colorGrading || {},
       subtitleFile,
+      resolution,
+      framerate: parseInt(framerate, 10) || 30,
       aspectRatio
     });
 
     res.json({
       success: true,
-      message: 'Render completed successfully',
+      message: 'Commercial render completed successfully',
       downloadUrl: `/outputs/${outputFileName}`,
-      filename: outputFileName
+      filename: outputFileName,
+      resolution: renderResult.resolution,
+      framerate: renderResult.framerate
     });
   } catch (err) {
     console.error('Render error:', err);
