@@ -1,0 +1,295 @@
+import React from 'react';
+import {
+  Subtitles,
+  Sparkles,
+  Type,
+  Palette,
+  Layers,
+  MoveVertical,
+  Play
+} from 'lucide-react';
+import { SubtitleStyle, SubtitleWord } from '../../types';
+
+interface SubtitleStylerProps {
+  style: SubtitleStyle;
+  onChange: (style: SubtitleStyle) => void;
+  subtitles: SubtitleWord[];
+  onSubtitlesChange: (words: SubtitleWord[]) => void;
+  currentTime: number;
+  onSeek: (time: number) => void;
+}
+
+export const SubtitleStyler: React.FC<SubtitleStylerProps> = ({
+  style,
+  onChange,
+  subtitles,
+  onSubtitlesChange,
+  currentTime,
+  onSeek,
+}) => {
+  const presets: { id: SubtitleStyle['preset']; name: string; style: Partial<SubtitleStyle> }[] = [
+    {
+      id: 'hormozi',
+      name: 'Alex Hormozi',
+      style: {
+        preset: 'hormozi',
+        fontFamily: "'Montserrat', Impact, sans-serif",
+        fontSize: 34,
+        textColor: '#FFFFFF',
+        highlightColor: '#FACC15', // Vibrant Yellow
+        strokeColor: '#000000',
+        strokeWidth: 4,
+        textCase: 'uppercase',
+        animation: 'bounce',
+        positionY: 18,
+      },
+    },
+    {
+      id: 'mrbeast',
+      name: 'MrBeast Pop',
+      style: {
+        preset: 'mrbeast',
+        fontFamily: "'Montserrat', Impact, sans-serif",
+        fontSize: 36,
+        textColor: '#FFFFFF',
+        highlightColor: '#22C55E', // Vivid Green
+        strokeColor: '#000000',
+        strokeWidth: 5,
+        textCase: 'uppercase',
+        animation: 'pop',
+        positionY: 20,
+      },
+    },
+    {
+      id: 'cinematic',
+      name: 'Cinematic Minimal',
+      style: {
+        preset: 'cinematic',
+        fontFamily: "'Inter', sans-serif",
+        fontSize: 22,
+        textColor: '#F3F4F6',
+        highlightColor: '#FFFFFF',
+        strokeColor: 'rgba(0,0,0,0.8)',
+        strokeWidth: 2,
+        textCase: 'normal',
+        animation: 'none',
+        positionY: 12,
+      },
+    },
+    {
+      id: 'cyberpunk',
+      name: 'Cyberpunk Neon',
+      style: {
+        preset: 'cyberpunk',
+        fontFamily: "'Montserrat', sans-serif",
+        fontSize: 32,
+        textColor: '#00F0FF',
+        highlightColor: '#FF0055',
+        strokeColor: '#000000',
+        strokeWidth: 3,
+        textCase: 'uppercase',
+        animation: 'glow',
+        positionY: 22,
+      },
+    },
+    {
+      id: 'boxed',
+      name: 'Modern Boxed',
+      style: {
+        preset: 'boxed',
+        fontFamily: "'Inter', sans-serif",
+        fontSize: 24,
+        textColor: '#FFFFFF',
+        highlightColor: '#38BDF8',
+        strokeColor: 'transparent',
+        strokeWidth: 0,
+        textCase: 'normal',
+        animation: 'none',
+        positionY: 15,
+      },
+    },
+  ];
+
+  const handleWordEdit = (id: string, newText: string) => {
+    onSubtitlesChange(
+      subtitles.map((w) => (w.id === id ? { ...w, word: newText } : w))
+    );
+  };
+
+  return (
+    <div className="h-full flex flex-col md:flex-row bg-resolve-950 overflow-hidden select-none">
+      {/* Left Column: Style Customizer */}
+      <div className="w-full md:w-80 bg-resolve-900 border-r border-resolve-800 p-4 flex flex-col space-y-4 overflow-y-auto">
+        <div className="flex items-center space-x-2 pb-2 border-b border-resolve-800">
+          <Subtitles className="w-4 h-4 text-resolve-orange" />
+          <span className="font-bold text-gray-200 text-sm">SUBTITLE ENGINE</span>
+        </div>
+
+        {/* Style Presets */}
+        <div className="flex flex-col space-y-2">
+          <label className="text-[11px] text-gray-400 font-mono flex items-center space-x-1">
+            <Sparkles className="w-3 h-3 text-resolve-orange" />
+            <span>VIRAL PRESETS</span>
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            {presets.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => onChange({ ...style, ...p.style })}
+                className={`px-3 py-2 rounded text-xs font-semibold text-left transition border ${
+                  style.preset === p.id
+                    ? 'bg-resolve-orange text-black border-resolve-orange shadow-md shadow-orange-500/20'
+                    : 'bg-resolve-850 text-gray-300 border-resolve-750 hover:border-resolve-700'
+                }`}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Font Size & Position Sliders */}
+        <div className="bg-resolve-850 border border-resolve-800 rounded-lg p-3 space-y-3">
+          <div className="flex flex-col space-y-1">
+            <div className="flex justify-between text-xs text-gray-400 font-mono">
+              <span>FONT SIZE</span>
+              <span className="text-resolve-orange">{style.fontSize}px</span>
+            </div>
+            <input
+              type="range"
+              min={18}
+              max={64}
+              value={style.fontSize}
+              onChange={(e) => onChange({ ...style, fontSize: parseInt(e.target.value) })}
+              className="w-full h-1 bg-resolve-750 accent-resolve-orange"
+            />
+          </div>
+
+          <div className="flex flex-col space-y-1">
+            <div className="flex justify-between text-xs text-gray-400 font-mono">
+              <span>VERTICAL POSITION</span>
+              <span className="text-resolve-cyan">{style.positionY || 16}%</span>
+            </div>
+            <input
+              type="range"
+              min={5}
+              max={50}
+              value={style.positionY || 16}
+              onChange={(e) => onChange({ ...style, positionY: parseInt(e.target.value) })}
+              className="w-full h-1 bg-resolve-750 accent-resolve-cyan"
+            />
+          </div>
+        </div>
+
+        {/* Colors: Text & Active Word Highlight */}
+        <div className="bg-resolve-850 border border-resolve-800 rounded-lg p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-300 font-mono">ACTIVE HIGHLIGHT</span>
+            <input
+              type="color"
+              value={style.highlightColor}
+              onChange={(e) => onChange({ ...style, highlightColor: e.target.value })}
+              className="w-7 h-7 rounded border border-resolve-700 cursor-pointer bg-transparent"
+            />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-300 font-mono">BASE TEXT COLOR</span>
+            <input
+              type="color"
+              value={style.textColor}
+              onChange={(e) => onChange({ ...style, textColor: e.target.value })}
+              className="w-7 h-7 rounded border border-resolve-700 cursor-pointer bg-transparent"
+            />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-300 font-mono">OUTLINE / STROKE</span>
+            <input
+              type="color"
+              value={style.strokeColor}
+              onChange={(e) => onChange({ ...style, strokeColor: e.target.value })}
+              className="w-7 h-7 rounded border border-resolve-700 cursor-pointer bg-transparent"
+            />
+          </div>
+        </div>
+
+        {/* Uppercase & Animation Toggles */}
+        <div className="flex items-center justify-between bg-resolve-850 border border-resolve-800 rounded-lg p-3">
+          <span className="text-xs text-gray-300 font-mono">UPPERCASE</span>
+          <button
+            onClick={() =>
+              onChange({
+                ...style,
+                textCase: style.textCase === 'uppercase' ? 'normal' : 'uppercase',
+              })
+            }
+            className={`px-2.5 py-1 rounded text-xs font-bold transition border ${
+              style.textCase === 'uppercase'
+                ? 'bg-resolve-orange text-black border-resolve-orange'
+                : 'bg-resolve-800 text-gray-400 border-resolve-700'
+            }`}
+          >
+            {style.textCase === 'uppercase' ? 'ON' : 'OFF'}
+          </button>
+        </div>
+      </div>
+
+      {/* Right Column: Live Interactive Word Transcript */}
+      <div className="flex-1 flex flex-col p-4 overflow-hidden">
+        <div className="flex items-center justify-between pb-3 border-b border-resolve-800">
+          <div>
+            <h3 className="font-bold text-gray-200 text-sm">INTERACTIVE WORD TIMINGS</h3>
+            <p className="text-xs text-gray-500">
+              Click any word to seek playhead directly. Edit words inline.
+            </p>
+          </div>
+          <span className="text-xs font-mono text-gray-400 bg-resolve-900 px-2 py-1 rounded border border-resolve-800">
+            {subtitles.length} words detected
+          </span>
+        </div>
+
+        {/* Word Grid / Stream */}
+        <div className="flex-1 overflow-y-auto mt-3 pr-2 flex flex-wrap gap-2 content-start">
+          {subtitles.length === 0 ? (
+            <div className="w-full h-48 flex flex-col items-center justify-center text-gray-500">
+              <Subtitles className="w-8 h-8 mb-2 opacity-40" />
+              <p className="text-sm">No transcript loaded yet.</p>
+              <p className="text-xs text-gray-600 mt-1">
+                Upload a video or click "Generate Subtitles" via the AI prompt bar!
+              </p>
+            </div>
+          ) : (
+            subtitles.map((sub) => {
+              const isCurrent = currentTime >= sub.start && currentTime <= sub.end;
+
+              return (
+                <div
+                  key={sub.id}
+                  onClick={() => onSeek(sub.start)}
+                  className={`flex items-center space-x-1 px-2.5 py-1.5 rounded border text-xs cursor-pointer transition ${
+                    isCurrent
+                      ? 'bg-amber-500/20 border-amber-400 text-amber-300 ring-1 ring-amber-400 shadow-sm'
+                      : 'bg-resolve-900 border-resolve-800 text-gray-300 hover:border-resolve-700 hover:text-white'
+                  }`}
+                >
+                  <Play className="w-2.5 h-2.5 opacity-60 mr-0.5" />
+                  <input
+                    type="text"
+                    value={sub.word}
+                    onChange={(e) => handleWordEdit(sub.id, e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="bg-transparent text-inherit font-semibold outline-none w-auto max-w-[120px]"
+                  />
+                  <span className="text-[10px] text-gray-500 font-mono ml-1">
+                    {sub.start.toFixed(1)}s
+                  </span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
