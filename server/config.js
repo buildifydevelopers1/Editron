@@ -13,14 +13,15 @@ dotenv.config();
 class ConfigManager {
   constructor() {
     this.config = {
-      port: process.env.PORT || 3001,
+      port: parseInt(process.env.PORT || '3001', 10),
+      host: process.env.HOST || '0.0.0.0',
       groqApiKey: process.env.GROQ_API_KEY || '',
       groqBaseUrl: process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1',
       groqLlmModel: process.env.GROQ_LLM_MODEL || 'gpt-oss-120b',
       groqWhisperModel: process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3',
       groqVisionModel: process.env.GROQ_VISION_MODEL || 'llama-3.2-11b-vision-preview',
-      uploadDir: path.resolve(__dirname, '../uploads'),
-      outputDir: path.resolve(__dirname, '../outputs'),
+      uploadDir: process.env.UPLOAD_DIR || path.resolve(__dirname, '../uploads'),
+      outputDir: process.env.OUTPUT_DIR || path.resolve(__dirname, '../outputs'),
     };
   }
 

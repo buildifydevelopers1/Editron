@@ -34,6 +34,7 @@ RUN ffmpeg -version && ffprobe -version
 # Set production environment
 ENV NODE_ENV=production
 ENV PORT=3001
+ENV HOST=0.0.0.0
 
 # Copy root & server package manifests
 COPY package*.json ./
@@ -60,10 +61,6 @@ RUN mkdir -p server/uploads server/outputs outputs
 
 # Expose server port (Render will bind to $PORT dynamically)
 EXPOSE 3001
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:${PORT:-3001}/api/health || exit 1
 
 # Start the Editron server
 CMD ["node", "server/index.js"]

@@ -10,7 +10,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const port = config.get('port');
+const port = parseInt(process.env.PORT || config.get('port') || '3001', 10);
+const host = '0.0.0.0';
 
 // Middleware
 app.use(cors());
@@ -70,10 +71,11 @@ if (fs.existsSync(clientDistPath)) {
   });
 }
 
-// Start server
-app.listen(port, () => {
+// Start server explicitly bound to 0.0.0.0 for Render, Docker & cloud reverse proxies
+app.listen(port, host, () => {
   console.log(`=================================================`);
-  console.log(`🎬 Editron Engine Server listening on port ${port}`);
+  console.log(`🎬 Editron Engine Server listening on http://${host}:${port}`);
+  console.log(`🌍 Cloud Port Detection Ready: bound to ${host}:${port}`);
   console.log(`🤖 AI LLM Model: ${config.get('groqLlmModel')}`);
   console.log(`🎙️ AI Whisper Model: ${config.get('groqWhisperModel')}`);
   console.log(`🌐 Base URL: ${config.get('groqBaseUrl')}`);
