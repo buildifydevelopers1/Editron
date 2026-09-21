@@ -7,6 +7,7 @@ interface AIPromptBarProps {
   modelName: string;
   aiSummary: string | null;
   onUploadPhotos?: () => void;
+  photosCount?: number;
 }
 
 export const AIPromptBar: React.FC<AIPromptBarProps> = ({
@@ -15,14 +16,15 @@ export const AIPromptBar: React.FC<AIPromptBarProps> = ({
   modelName,
   aiSummary,
   onUploadPhotos,
+  photosCount = 0,
 }) => {
   const [inputPrompt, setInputPrompt] = useState('');
 
   const quickChips = [
     {
-      label: '📸 10 Photos to Attitude Reel',
+      label: photosCount > 0 ? `📸 Rebuild Reel with My ${photosCount} Photos` : '📸 10 Photos to Attitude Reel',
       icon: <Camera className="w-3 h-3 text-pink-400" />,
-      prompt: 'Create a rich attitude reel from 10 photos with trending song and transitions',
+      prompt: photosCount > 0 ? `Create an attitude reel using my ${photosCount} uploaded photos with trending song and transitions` : 'Create a rich attitude reel from 10 photos with trending song and transitions',
     },
     {
       label: '🔥 Trending Attitude Hindi Reel',
@@ -72,6 +74,13 @@ export const AIPromptBar: React.FC<AIPromptBarProps> = ({
           <span>Quick Prompts:</span>
         </span>
 
+        {photosCount > 0 && (
+          <span className="text-[11px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono flex items-center space-x-1 whitespace-nowrap">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>{photosCount} Photos Loaded</span>
+          </span>
+        )}
+
         {quickChips.map((chip, idx) => (
           <button
             key={idx}
@@ -92,7 +101,7 @@ export const AIPromptBar: React.FC<AIPromptBarProps> = ({
             className="flex items-center space-x-1.5 bg-gradient-to-r from-pink-600/30 to-purple-600/30 hover:from-pink-600/50 hover:to-purple-600/50 border border-pink-500/40 hover:border-pink-400 text-pink-200 hover:text-white px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap transition disabled:opacity-50 shadow-sm"
           >
             <Camera className="w-3 h-3 text-pink-400" />
-            <span>Upload 10 Photos</span>
+            <span>{photosCount > 0 ? `Change Photos (${photosCount})` : 'Upload 10 Photos'}</span>
           </button>
         )}
       </div>

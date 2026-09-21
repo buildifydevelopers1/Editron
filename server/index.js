@@ -24,29 +24,29 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
 // Auto-seed sample media into uploadDir if not present (handles fresh Render persistent disks)
-const sampleVideoPath = path.join(uploadDir, 'sample_editron.mp4');
-if (!fs.existsSync(sampleVideoPath)) {
-  const candidateSeeds = [
-    path.join(__dirname, '../client/public/uploads'),
-    path.join(__dirname, '../client/dist/uploads'),
-    path.join(__dirname, '../../client/public/uploads')
-  ];
-  for (const seedDir of candidateSeeds) {
-    if (fs.existsSync(seedDir)) {
-      try {
-        const files = fs.readdirSync(seedDir);
-        for (const file of files) {
-          const src = path.join(seedDir, file);
-          const dest = path.join(uploadDir, file);
-          if (!fs.existsSync(dest) && fs.statSync(src).isFile()) {
-            fs.copyFileSync(src, dest);
-          }
+const candidateSeeds = [
+  path.join(__dirname, '../client/public/uploads'),
+  path.join(__dirname, '../client/dist/uploads'),
+  path.join(__dirname, '../../client/public/uploads')
+];
+for (const seedDir of candidateSeeds) {
+  if (fs.existsSync(seedDir)) {
+    try {
+      const files = fs.readdirSync(seedDir);
+      let copiedCount = 0;
+      for (const file of files) {
+        const src = path.join(seedDir, file);
+        const dest = path.join(uploadDir, file);
+        if (!fs.existsSync(dest) && fs.statSync(src).isFile()) {
+          fs.copyFileSync(src, dest);
+          copiedCount++;
         }
-        console.log(`✅ Auto-seeded ${files.length} sample media assets into ${uploadDir}`);
-        break;
-      } catch (err) {
-        console.warn('Auto-seed notice:', err.message);
       }
+      if (copiedCount > 0) {
+        console.log(`✅ Auto-seeded ${copiedCount} media assets from ${seedDir} into ${uploadDir}`);
+      }
+    } catch (err) {
+      console.warn('Auto-seed notice:', err.message);
     }
   }
 }

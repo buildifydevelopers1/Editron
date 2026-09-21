@@ -71,6 +71,7 @@ export function App() {
   const [videoUrl, setVideoUrl] = useState<string>('/uploads/sample_editron.mp4');
   const [videoPath, setVideoPath] = useState<string>('uploads/sample_editron.mp4');
   const [reelAudioUrl, setReelAudioUrl] = useState<string | undefined>(undefined);
+  const [userPhotos, setUserPhotos] = useState<any[]>([]);
   const [duration, setDuration] = useState<number>(12.0);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -419,9 +420,10 @@ export function App() {
     if (
       p.includes('photo') ||
       p.includes('image') ||
-      p.includes('montage')
+      p.includes('montage') ||
+      (userPhotos.length > 0 && (p.includes('reel') || p.includes('attitude')))
     ) {
-      await handlePhotosToReel();
+      await handlePhotosToReel(userPhotos);
       return;
     }
 
@@ -737,16 +739,142 @@ export function App() {
     setIsProcessing(true);
     setProcessingStatus('AI Director assembling 10-photo attitude reel with beat drops & transitions...');
 
+    const targetPhotos = (uploadedPhotos && uploadedPhotos.length > 0) ? uploadedPhotos : userPhotos;
+
+    if (!targetPhotos || targetPhotos.length === 0) {
+      setIsProcessing(false);
+      setProcessingStatus('');
+      photoInputRef.current?.click();
+      return;
+    }
+
+    // Offline / Local Photo Montage Assembler (works with zero API keys or backend offline)
+    const assembleLocalPhotoReel = () => {
+      const photoDuration = 1.2;
+      const totalDuration = targetPhotos.length * photoDuration;
+
+      const transitionTypes = [
+        { type: 'whip_pan' as const, name: 'Whip Pan' },
+        { type: 'zoom_blur' as const, name: 'Zoom Blur' },
+        { type: 'dip_white' as const, name: 'Flash Shutter' },
+        { type: 'glitch' as const, name: 'Cyber Glitch' },
+        { type: 'film_burn' as const, name: 'Film Burn' },
+        { type: 'spin' as const, name: 'Warp Spin' }
+      ];
+
+      const attitudeCaptions = [
+        'RULE #1',
+        'NEVER APOLOGIZE',
+        'FOR BEING AMBITIOUS',
+        'THEY DOUBTED ME',
+        'NOW THEY WATCH',
+        'SILENCE IS MY POWER',
+        'SUCCESS IS MY NOISE',
+        'BORN AN ORIGINAL',
+        'NOT A COPY',
+        'WATCH ME LEVEL UP 🔥'
+      ];
+
+      const newClips: VideoClip[] = [];
+      const newTransitions: VideoTransition[] = [];
+      const newSubtitles: SubtitleWord[] = [];
+
+      targetPhotos.forEach((photo, idx) => {
+        const start = idx * photoDuration;
+        const end = start + photoDuration;
+
+        newClips.push({
+          id: `photo-clip-${idx}-${Date.now()}`,
+          name: photo.name || `Photo ${idx + 1}`,
+          trackId: 'v1',
+          type: 'image',
+          imageUrl: photo.url,
+          start,
+          end,
+          sourceStart: 0,
+          sourceEnd: photoDuration,
+          speed: 1.0,
+          label: `Slide ${idx + 1}`
+        });
+
+        if (idx > 0) {
+          const tType = transitionTypes[(idx - 1) % transitionTypes.length];
+          newTransitions.push({
+            id: `trans-${idx}-${Date.now()}`,
+            type: tType.type,
+            name: tType.name,
+            timestamp: start,
+            duration: 0.35,
+          });
+        }
+
+        const captionText = attitudeCaptions[idx % attitudeCaptions.length];
+        const words = captionText.split(' ');
+        const wordTime = photoDuration / words.length;
+        words.forEach((w, wIdx) => {
+          newSubtitles.push({
+            id: `sub-word-${idx}-${wIdx}-${Date.now()}`,
+            word: w,
+            start: start + (wIdx * wordTime),
+            end: start + ((wIdx + 1) * wordTime)
+          });
+        });
+      });
+
+      setAspectRatio('9:16');
+      setDuration(totalDuration);
+      setCurrentTime(0);
+      setClips(newClips);
+      setSelectedClipId(newClips[0]?.id || null);
+      setTransitions(newTransitions);
+      setSubtitles(newSubtitles);
+      setColorGrading({
+        presetName: 'Attitude Reel Noir & Gold',
+        temperature: 15,
+        tint: -8,
+        contrast: 45,
+        saturation: 28,
+        brightness: -2,
+        lift: { r: -0.08, g: 0.02, b: 0.1, master: -0.04 },
+        gamma: { r: 0.04, g: -0.02, b: -0.04, master: 0.0 },
+        gain: { r: 0.18, g: 0.08, b: -0.06, master: 0.08 },
+        offset: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 }
+      });
+      setSubtitleStyle({
+        preset: 'hormozi',
+        fontFamily: "'Montserrat', Impact, sans-serif",
+        fontSize: 40,
+        textColor: '#FFFFFF',
+        highlightColor: '#FACC15',
+        strokeColor: '#000000',
+        strokeWidth: 5,
+        textCase: 'uppercase',
+        animation: 'bounce',
+        positionY: 22
+      });
+      setEffects([
+        { id: 'fx-vignette', type: 'vignette', name: 'Cinematic Vignette', enabled: true, intensity: 45 },
+        { id: 'fx-grain', type: 'film_grain', name: '35mm Film Grain', enabled: true, intensity: 35 },
+        { id: 'fx-shake', type: 'camera_shake', name: 'Camera Shake', enabled: true, intensity: 45 },
+        { id: 'fx-glow', type: 'glow', name: 'Dream Glow', enabled: false, intensity: 40 },
+        { id: 'fx-vhs', type: 'vhs_scanlines', name: 'Retro VHS Scanlines', enabled: false, intensity: 35 },
+        { id: 'fx-letterbox', type: 'cinematic_letterbox', name: '2.39:1 Cinema Letterbox', enabled: false, intensity: 100 },
+        { id: 'fx-split', type: 'rgb_split', name: 'RGB Chromatic Aberration', enabled: true, intensity: 20 }
+      ]);
+      setReelAudioUrl(resolveAssetUrl('/uploads/elevated_attitude_beat.mp3'));
+      setAiSummary(`Successfully compiled ${targetPhotos.length}-Photo Attitude Reel in 9:16 vertical ratio synced to Elevated Attitude Beat with beat-drop transitions and Hormozi captions.`);
+    };
+
     try {
       const montage = await generatePhotosToReel({
-        photos: uploadedPhotos || [],
+        photos: targetPhotos,
         prompt: '10 photos attitude reel with trending song and transitions',
         songId,
       });
 
       if (montage) {
         setAspectRatio('9:16');
-        setDuration(montage.duration || 12.0);
+        setDuration(montage.duration || targetPhotos.length * 1.2);
         setCurrentTime(0);
         setClips(montage.clips || []);
         setSelectedClipId(montage.clips?.[0]?.id || null);
@@ -755,12 +883,14 @@ export function App() {
         if (montage.colorGrading) setColorGrading(montage.colorGrading);
         if (montage.subtitleStyle) setSubtitleStyle(montage.subtitleStyle);
         if (montage.effects) setEffects(montage.effects);
-        if (montage.audioTrack?.url) setReelAudioUrl(montage.audioTrack.url);
+        if (montage.audioTrack?.url) setReelAudioUrl(resolveAssetUrl(montage.audioTrack.url));
         if (montage.summary) setAiSummary(montage.summary);
+      } else {
+        assembleLocalPhotoReel();
       }
     } catch (err: any) {
-      console.error('Failed to create photo montage reel:', err);
-      alert(`Photo montage error: ${err.message}`);
+      console.warn('Backend photo reel fallback (compiling locally):', err.message);
+      assembleLocalPhotoReel();
     } finally {
       setIsProcessing(false);
       setProcessingStatus('');
@@ -772,20 +902,35 @@ export function App() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    setIsProcessing(true);
-    setProcessingStatus(`Uploading ${files.length} photos...`);
+    const fileList = Array.from(files);
+    // 1. Create immediate local object URLs so images work 100% offline without waiting
+    const localPhotoItems = fileList.map((f, i) => ({
+      id: `photo-${Date.now()}-${i}`,
+      name: f.name,
+      url: URL.createObjectURL(f),
+      file: f,
+    }));
 
+    // 2. Persist in userPhotos state permanently for this session
+    setUserPhotos(localPhotoItems);
+
+    setIsProcessing(true);
+    setProcessingStatus(`Processing ${files.length} uploaded photos...`);
+
+    // 3. Try to upload to backend, fallback to localPhotoItems if offline
+    let finalPhotos = localPhotoItems;
     try {
-      const fileList = Array.from(files);
       const uploaded = await uploadPhotos(fileList);
-      await handlePhotosToReel(uploaded);
+      if (uploaded && uploaded.length > 0) {
+        finalPhotos = uploaded;
+        setUserPhotos(uploaded);
+      }
     } catch (err: any) {
-      console.error('Photo batch upload error:', err);
-      alert(`Upload error: ${err.message}`);
-    } finally {
-      setIsProcessing(false);
-      setProcessingStatus('');
+      console.warn('Backend photo upload notice (continuing with local photos):', err.message);
     }
+
+    // 4. Assemble reel with the photos!
+    await handlePhotosToReel(finalPhotos);
   };
 
   // Transition and OpenFX Handlers
@@ -850,6 +995,7 @@ export function App() {
         modelName={config?.llmModel || 'gpt-oss-120b'}
         aiSummary={aiSummary}
         onUploadPhotos={() => photoInputRef.current?.click()}
+        photosCount={userPhotos.length}
       />
 
       {/* Main Workspace Dynamic Page Body */}

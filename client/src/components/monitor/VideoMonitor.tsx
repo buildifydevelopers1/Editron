@@ -84,12 +84,14 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
   // Precision Responsive Viewport Rectangle (Exact Letterbox/Pillarbox Bounding Box)
   const viewportRect = useVideoViewport(stageContainerRef, aspectRatio);
 
+  const isPhotoMontage = clips.length > 0 && clips.some((c) => c.type === 'image');
+
   // Active clip at current time
   const activeClip = clips.find(
     (c) => c.trackId === 'v1' && currentTime >= c.start && currentTime < c.end
   ) || clips.find(
     (c) => currentTime >= c.start && currentTime < c.end
-  );
+  ) || (isPhotoMontage && clips.length > 0 ? clips[Math.min(clips.length - 1, Math.floor(currentTime / Math.max(0.1, duration / clips.length)))] : null);
 
   // Subscribe to Web Audio Engine unlock state
   useEffect(() => {
@@ -99,11 +101,11 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
   // Set direct native element volume and mute states (100% reliable sound in all browsers)
   useEffect(() => {
     if (videoRef.current) {
-      videoRef.current.volume = isMuted ? 0 : 1.0;
+      videoRef.current.volume = isMuted ? 0 : (audioUrl ? 0.2 : 1.0);
       videoRef.current.muted = isMuted;
     }
     if (audioRef.current) {
-      audioRef.current.volume = isMuted ? 0 : 0.85;
+      audioRef.current.volume = isMuted ? 0 : 0.95;
       audioRef.current.muted = isMuted;
     }
   }, [isMuted, videoUrl, audioUrl]);
@@ -135,7 +137,7 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
 
   // Sync video element with external playback state
   useEffect(() => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || isPhotoMontage) return;
     if (isPlaying && videoRef.current.paused) {
       videoRef.current.play().catch(() => {
         setIsAudioUnlocked(false);
@@ -143,15 +145,15 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
     } else if (!isPlaying && !videoRef.current.paused) {
       videoRef.current.pause();
     }
-  }, [isPlaying]);
+  }, [isPlaying, isPhotoMontage]);
 
   // Frame-accurate seek synchronization for video
   useEffect(() => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || isPhotoMontage) return;
     if (Math.abs(videoRef.current.currentTime - currentTime) > 0.04) {
       videoRef.current.currentTime = currentTime;
     }
-  }, [currentTime]);
+  }, [currentTime, isPhotoMontage]);
 
   // Sync secondary audio element with play/pause state
   useEffect(() => {
@@ -171,38 +173,69 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
     }
   }, [isPlaying, audioUrl]);
 
-  // Sync secondary audio seek time ONLY when paused or when drift exceeds 0.35s
+  // Sync secondary audio seek time ONLY when paused or when video drift exceeds 0.35s
   useEffect(() => {
     if (!audioRef.current || !audioUrl) return;
 
     if (!isPlaying) {
       audioRef.current.currentTime = currentTime;
-    } else {
+    } else if (!isPhotoMontage) {
       const drift = Math.abs(audioRef.current.currentTime - currentTime);
       if (drift > 0.35) {
         audioRef.current.currentTime = currentTime;
       }
     }
-  }, [currentTime, isPlaying, audioUrl]);
+  }, [currentTime, isPlaying, audioUrl, isPhotoMontage]);
 
-  // Image montage playback driver (ticks playhead smoothly if active media is an image sequence)
+  // Stable refs for image montage playback loop to avoid tearing
+  const onSeekRef = useRef(onSeek);
+  onSeekRef.current = onSeek;
+  const onPlayPauseRef = useRef(onPlayPause);
+  onPlayPauseRef.current = onPlayPause;
+  const durationRef = useRef(duration);
+  durationRef.current = duration;
+
+  // Image montage playback driver (ticks playhead from audio clock smoothly)
   useEffect(() => {
-    if (!isPlaying) return;
-    const isImagePlaying = activeClip?.type === 'image' || (!videoUrl && clips.length > 0);
-    if (!isImagePlaying) return;
+    if (!isPlaying || !isPhotoMontage) return;
 
+    // If an audio track is present, drive playhead directly from audio hardware clock!
+    if (audioRef.current && audioUrl) {
+      let rafId: number;
+      const syncWithAudio = () => {
+        if (audioRef.current && !audioRef.current.paused) {
+          const t = audioRef.current.currentTime;
+          if (t >= durationRef.current) {
+            onSeekRef.current(0);
+            onPlayPauseRef.current();
+            return;
+          }
+          onSeekRef.current(t);
+        }
+        rafId = requestAnimationFrame(syncWithAudio);
+      };
+      rafId = requestAnimationFrame(syncWithAudio);
+      return () => cancelAnimationFrame(rafId);
+    }
+
+    // Fallback timer if no audio track exists
+    let lastTime = performance.now();
+    let currentT = currentTime;
     const timer = setInterval(() => {
-      const nextTime = currentTime + 0.033;
-      if (nextTime >= duration) {
-        onSeek(0);
-        onPlayPause();
+      const now = performance.now();
+      const delta = (now - lastTime) / 1000;
+      lastTime = now;
+      currentT += delta;
+      if (currentT >= durationRef.current) {
+        onSeekRef.current(0);
+        onPlayPauseRef.current();
       } else {
-        onSeek(nextTime);
+        onSeekRef.current(currentT);
       }
     }, 33);
 
     return () => clearInterval(timer);
-  }, [isPlaying, currentTime, duration, activeClip, videoUrl, clips, onSeek, onPlayPause]);
+  }, [isPlaying, isPhotoMontage, audioUrl]);
 
   // Format seconds to DaVinci Resolve Timecode: HH:MM:SS:FF (30fps)
   const formatTimecode = (sec: number) => {
@@ -299,6 +332,33 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
     if (success && isPlaying && videoRef.current) {
       videoRef.current.play().catch(() => {});
     }
+    if (success && isPlaying && audioRef.current) {
+      audioRef.current.play().catch(() => {});
+    }
+  };
+
+  const handleTogglePlay = () => {
+    audioEngine.unlock();
+    const willPlay = !isPlaying;
+
+    if (willPlay) {
+      if (videoRef.current && !isPhotoMontage) {
+        videoRef.current.muted = isMuted;
+        videoRef.current.volume = isMuted ? 0 : (audioUrl ? 0.2 : 1.0);
+        videoRef.current.play().catch(() => setIsAudioUnlocked(false));
+      }
+      if (audioRef.current && audioUrl) {
+        audioRef.current.muted = isMuted;
+        audioRef.current.volume = isMuted ? 0 : 0.95;
+        audioRef.current.currentTime = currentTime;
+        audioRef.current.play().catch(() => setIsAudioUnlocked(false));
+      }
+    } else {
+      if (videoRef.current) videoRef.current.pause();
+      if (audioRef.current) audioRef.current.pause();
+    }
+
+    onPlayPause();
   };
 
   return (
@@ -382,10 +442,10 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
         </div>
       </div>
 
-      {/* Main Viewport Stage: Dynamic Letterbox & Pillarbox Presentation */}
+      {/* Main Screen Canvas Stage */}
       <div
         ref={stageContainerRef}
-        className="flex-1 flex items-center justify-center p-2 relative bg-[#070709] overflow-hidden"
+        className="flex-1 relative flex items-center justify-center p-4 bg-resolve-950 overflow-hidden"
       >
         {/* Autoplay Unlock Notice Badge */}
         {!isAudioUnlocked && (
@@ -407,23 +467,23 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
             height: `${viewportRect.height}px`,
           }}
         >
-          {/* Audio BGM Track (Secondary Audio Channel) */}
+          {/* Audio BGM Track (Secondary Audio Channel / Photo Montage Master Track) */}
           {audioUrl && (
             <audio
-              key={audioUrl}
               ref={audioRef}
               src={audioUrl}
-              crossOrigin="anonymous"
+              preload="auto"
               playsInline
               muted={isMuted}
             />
           )}
 
           {/* Visual Surface: Photo Slide or Video Surface */}
-          {activeClip?.type === 'image' && activeClip?.imageUrl ? (
+          {isPhotoMontage && activeClip?.imageUrl ? (
             <img
+              key={activeClip.id || activeClip.imageUrl}
               src={activeClip.imageUrl}
-              alt={activeClip.name}
+              alt={activeClip.name || 'Photo Slide'}
               className="w-full h-full object-contain pointer-events-none select-none transition-transform duration-100"
               style={{
                 filter: videoFilterStyle,
@@ -431,12 +491,11 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
                 opacity: transform.opacity,
               }}
             />
-          ) : (
+          ) : !isPhotoMontage && videoUrl ? (
             <video
               key={videoUrl}
               ref={videoRef}
               src={videoUrl}
-              crossOrigin="anonymous"
               className="w-full h-full object-contain pointer-events-none transition-transform duration-75"
               style={{
                 filter: videoFilterStyle,
@@ -449,7 +508,7 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
               onTimeUpdate={(e) => onSeek(e.currentTarget.currentTime)}
               onEnded={() => onPlayPause()}
             />
-          )}
+          ) : null}
 
           {/* Video Stream Load Error Fallback Overlay */}
           {videoLoadError && (
@@ -640,7 +699,7 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
 
           {/* Play / Pause */}
           <button
-            onClick={onPlayPause}
+            onClick={handleTogglePlay}
             className="p-2 bg-resolve-800 hover:bg-resolve-orange hover:text-black rounded-md text-white transition shadow-sm"
             title="Play / Pause (Space)"
           >
