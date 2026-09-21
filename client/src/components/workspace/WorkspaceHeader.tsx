@@ -13,7 +13,10 @@ import {
   CheckCircle2,
   AlertCircle,
   Zap,
-  Music
+  Music,
+  Undo2,
+  Redo2,
+  Wand2
 } from 'lucide-react';
 import { WorkspacePage, AppConfig } from '../../types';
 
@@ -26,9 +29,14 @@ interface WorkspaceHeaderProps {
   onOpenVision: () => void;
   onOpenMusic: () => void;
   onOpenSubtitleGallery: () => void;
+  onOpenMultiComposer?: () => void;
   onUploadClick: () => void;
   isProcessing: boolean;
   processingStatus: string;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
 }
 
 export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
@@ -40,9 +48,14 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   onOpenVision,
   onOpenMusic,
   onOpenSubtitleGallery,
+  onOpenMultiComposer,
   onUploadClick,
   isProcessing,
   processingStatus,
+  canUndo = false,
+  canRedo = false,
+  onUndo,
+  onRedo,
 }) => {
   const pages: { id: WorkspacePage; label: string; icon: React.ReactNode }[] = [
     { id: 'media', label: 'Media', icon: <Film className="w-4 h-4" /> },
@@ -72,6 +85,36 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         <div className="text-xs text-gray-400 font-mono flex items-center space-x-1.5">
           <span className="text-gray-300 font-semibold">Master_Timeline_v1</span>
           <span className="text-resolve-500">• 4K / 30fps</span>
+        </div>
+
+        <div className="h-4 w-px bg-resolve-700 mx-1" />
+
+        {/* Undo & Redo Quick Buttons */}
+        <div className="flex items-center space-x-1">
+          <button
+            onClick={onUndo}
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z)"
+            className={`p-1.5 rounded transition ${
+              canUndo
+                ? 'text-gray-300 hover:text-white hover:bg-resolve-800 cursor-pointer'
+                : 'text-gray-600 cursor-not-allowed opacity-40'
+            }`}
+          >
+            <Undo2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={onRedo}
+            disabled={!canRedo}
+            title="Redo (Ctrl+Y / Ctrl+Shift+Z)"
+            className={`p-1.5 rounded transition ${
+              canRedo
+                ? 'text-gray-300 hover:text-white hover:bg-resolve-800 cursor-pointer'
+                : 'text-gray-600 cursor-not-allowed opacity-40'
+            }`}
+          >
+            <Redo2 className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
@@ -147,6 +190,18 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           <Subtitles className="w-3.5 h-3.5" />
           <span>Subtitles</span>
         </button>
+
+        {/* Multi-Asset AI Composer Button */}
+        {onOpenMultiComposer && (
+          <button
+            onClick={onOpenMultiComposer}
+            title="Upload Photos, Videos, Music & Prompt Simultaneously"
+            className="flex items-center space-x-1.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 hover:from-violet-500 hover:to-indigo-500 text-white px-3 py-1 rounded text-xs font-bold transition shadow-md shadow-indigo-500/20"
+          >
+            <Wand2 className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+            <span>AI Composer</span>
+          </button>
+        )}
 
         {/* Upload Button */}
         <button

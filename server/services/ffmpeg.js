@@ -421,4 +421,128 @@ export class FFmpegService {
       });
     });
   }
+
+  /**
+   * Automatically detect and extract the highest-energy viral hook/chorus from an audio file.
+   * Scans candidate windows using FFmpeg volume/energy analysis, isolates the peak section,
+   * and trims it to targetDuration with studio micro-fades.
+   */
+  static async extractViralHook({
+    audioPath,
+    outputAudioPath,
+    targetDuration = 20
+  }) {
+    const meta = await this.getVideoMetadata(audioPath);
+    const originalDuration = meta.duration || 180;
+
+    const formatTs = (sec) => {
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      return `${m}:${s.toString().padStart(2, '0')}`;
+    };
+
+    // If audio is shorter than or roughly equal to target duration
+    if (originalDuration <= targetDuration + 1.0) {
+      const fadeOutSec = Math.max(0, originalDuration - 0.5);
+      const args = [
+        '-y',
+        '-i', audioPath,
+        '-t', targetDuration.toString(),
+        '-af', `afade=t=in:ss=0:d=0.2,afade=t=out:st=${fadeOutSec.toFixed(2)}:d=0.5`,
+        outputAudioPath
+      ];
+      try {
+        await execFileAsync('ffmpeg', args);
+      } catch {
+        fs.copyFileSync(audioPath, outputAudioPath);
+      }
+      return {
+        trimmedAudioPath: outputAudioPath,
+        hookStart: 0,
+        hookEnd: Math.min(originalDuration, targetDuration),
+        originalDuration,
+        description: `Full audio track preserved (${originalDuration.toFixed(1)}s).`
+      };
+    }
+
+    // In commercial music, the main chorus/drop typically hits between 25% and 65% of the song.
+    let bestStart = Math.round(originalDuration * 0.35);
+
+    try {
+      // Sample 6 candidate windows across the track to measure loudness/energy
+      const candidateStarts = [];
+      const step = Math.max(10, (originalDuration - targetDuration - 10) / 6);
+      for (let s = Math.max(5, originalDuration * 0.15); s <= originalDuration - targetDuration - 5; s += step) {
+        candidateStarts.push(Math.round(s));
+      }
+      if (candidateStarts.length === 0) {
+        candidateStarts.push(Math.round(originalDuration * 0.3));
+      }
+
+      let maxVolume = -999;
+      for (const startSec of candidateStarts) {
+        try {
+          const { stderr } = await execFileAsync('ffmpeg', [
+            '-ss', startSec.toString(),
+            '-t', '5',
+            '-i', audioPath,
+            '-af', 'volumedetect',
+            '-f', 'null',
+            '-'
+          ]);
+          const meanMatch = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/);
+          const maxMatch = stderr.match(/max_volume:\s*([-\d.]+)\s*dB/);
+          const meanVol = meanMatch ? parseFloat(meanMatch[1]) : -30;
+          const maxVol = maxMatch ? parseFloat(maxMatch[1]) : -10;
+          const energyScore = (meanVol * 0.7) + (maxVol * 0.3);
+
+          if (energyScore > maxVolume) {
+            maxVolume = energyScore;
+            bestStart = startSec;
+          }
+        } catch {
+          // skip sample on failure
+        }
+      }
+    } catch (analysisErr) {
+      console.warn('Audio energy analysis fallback:', analysisErr.message);
+      bestStart = Math.round(originalDuration * 0.35);
+    }
+
+    const hookEnd = bestStart + targetDuration;
+    const fadeOutStart = Math.max(0, targetDuration - 0.6);
+
+    const trimArgs = [
+      '-y',
+      '-ss', bestStart.toString(),
+      '-t', targetDuration.toString(),
+      '-i', audioPath,
+      '-af', `afade=t=in:ss=0:d=0.2,afade=t=out:st=${fadeOutStart.toFixed(2)}:d=0.6`,
+      '-b:a', '192k',
+      outputAudioPath
+    ];
+
+    try {
+      await execFileAsync('ffmpeg', trimArgs);
+    } catch (trimErr) {
+      console.warn('Trim with fade warning, executing stream copy:', trimErr.message);
+      await execFileAsync('ffmpeg', [
+        '-y',
+        '-ss', bestStart.toString(),
+        '-t', targetDuration.toString(),
+        '-i', audioPath,
+        '-c:a', 'copy',
+        outputAudioPath
+      ]);
+    }
+
+    return {
+      trimmedAudioPath: outputAudioPath,
+      hookStart: bestStart,
+      hookEnd,
+      originalDuration,
+      description: `Auto-extracted ${targetDuration}s viral peak chorus from ${formatTs(bestStart)} to ${formatTs(hookEnd)} of original ${formatTs(originalDuration)} track.`
+    };
+  }
 }
+

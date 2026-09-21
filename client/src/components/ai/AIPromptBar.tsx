@@ -8,6 +8,7 @@ interface AIPromptBarProps {
   aiSummary: string | null;
   onUploadPhotos?: () => void;
   photosCount?: number;
+  onOpenMultiComposer?: () => void;
 }
 
 export const AIPromptBar: React.FC<AIPromptBarProps> = ({
@@ -17,6 +18,7 @@ export const AIPromptBar: React.FC<AIPromptBarProps> = ({
   aiSummary,
   onUploadPhotos,
   photosCount = 0,
+  onOpenMultiComposer,
 }) => {
   const [inputPrompt, setInputPrompt] = useState('');
 
@@ -102,6 +104,18 @@ export const AIPromptBar: React.FC<AIPromptBarProps> = ({
           >
             <Camera className="w-3 h-3 text-pink-400" />
             <span>{photosCount > 0 ? `Change Photos (${photosCount})` : 'Upload 10 Photos'}</span>
+          </button>
+        )}
+
+        {onOpenMultiComposer && (
+          <button
+            type="button"
+            onClick={onOpenMultiComposer}
+            disabled={isProcessing}
+            className="flex items-center space-x-1.5 bg-gradient-to-r from-violet-600/40 via-indigo-600/40 to-purple-600/40 hover:from-violet-600/60 hover:to-indigo-600/60 border border-violet-500/50 hover:border-violet-400 text-violet-200 hover:text-white px-3 py-1 rounded text-xs font-bold whitespace-nowrap transition disabled:opacity-50 shadow-sm"
+          >
+            <Sparkles className="w-3 h-3 text-amber-300 animate-pulse" />
+            <span>Multi-Asset + Prompt Studio</span>
           </button>
         )}
       </div>

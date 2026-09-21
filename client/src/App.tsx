@@ -14,7 +14,9 @@ import { VisionAnalysisModal } from './components/vision/VisionAnalysisModal';
 import { AssetLibraryPanel } from './components/media/AssetLibraryPanel';
 import { TrendingSongPickerModal } from './components/audio/TrendingSongPickerModal';
 import { SubtitleStyleGalleryModal } from './components/subtitles/SubtitleStyleGalleryModal';
+import { MultiAssetComposerModal } from './components/composer/MultiAssetComposerModal';
 import { EffectsPanel } from './components/effects/EffectsPanel';
+import { useTimelineHistory, TimelineSnapshot } from './hooks/useTimelineHistory';
 import {
   AppConfig,
   AspectRatio,
@@ -61,6 +63,7 @@ export function App() {
   const [trendingQuery, setTrendingQuery] = useState('trending attitude hindi song');
   const [isApplyingReel, setIsApplyingReel] = useState(false);
   const [isSubtitleGalleryOpen, setIsSubtitleGalleryOpen] = useState(false);
+  const [isMultiComposerOpen, setIsMultiComposerOpen] = useState(false);
 
   // Vision Analysis State
   const [visionFrames, setVisionFrames] = useState<KeyframeItem[]>([]);
@@ -206,6 +209,66 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
+  // Timeline Undo/Redo History Engine
+  const {
+    canUndo,
+    canRedo,
+    recordSnapshot,
+    undo,
+    redo,
+  } = useTimelineHistory({
+    clips,
+    transitions,
+    subtitles,
+    subtitleStyle,
+    colorGrading,
+    effects,
+    aspectRatio,
+    transform,
+    reelAudioUrl,
+    duration,
+    userPhotos,
+  });
+
+  const applyTimelineSnapshot = (s: TimelineSnapshot) => {
+    setClips(s.clips);
+    setTransitions(s.transitions);
+    setSubtitles(s.subtitles);
+    setSubtitleStyle(s.subtitleStyle);
+    setColorGrading(s.colorGrading);
+    setEffects(s.effects);
+    setAspectRatio(s.aspectRatio);
+    setTransform(s.transform);
+    setReelAudioUrl(s.reelAudioUrl);
+    setDuration(s.duration);
+    if (s.userPhotos) setUserPhotos(s.userPhotos);
+    if (s.clips.length > 0) setSelectedClipId(s.clips[0].id);
+  };
+
+  const handleUndo = () => {
+    undo(applyTimelineSnapshot);
+  };
+
+  const handleRedo = () => {
+    redo(applyTimelineSnapshot);
+  };
+
+  const saveCurrentSnapshot = () => {
+    recordSnapshot({
+      clips,
+      transitions,
+      subtitles,
+      subtitleStyle,
+      colorGrading,
+      effects,
+      aspectRatio,
+      transform,
+      reelAudioUrl,
+      duration,
+      userPhotos,
+    });
+  };
+
   // Initial config load & asset library load
   useEffect(() => {
     fetchConfig()
@@ -293,11 +356,29 @@ export function App() {
     setClips((prev) => [...prev, ...newClips]);
   };
 
-  // Keyboard Shortcuts (DaVinci Resolve style: Space, C, Delete, Left/Right)
+  // Keyboard Shortcuts (Space, C, Delete, Left/Right, and Ctrl+Z / Ctrl+Y Undo/Redo)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't trigger if typing in an input
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+        return;
+      }
+
+      // Ctrl+Z or Cmd+Z for Undo / Redo
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+        return;
+      }
+
+      // Ctrl+Y for Redo
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        handleRedo();
         return;
       }
 
@@ -309,6 +390,7 @@ export function App() {
         splitCurrentClip();
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedClipId) {
+          saveCurrentSnapshot();
           setClips((prev) => prev.filter((c) => c.id !== selectedClipId));
           setSelectedClipId(null);
         }
@@ -321,11 +403,12 @@ export function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedClipId, currentTime, duration, clips]);
+  }, [selectedClipId, currentTime, duration, clips, canUndo, canRedo]);
 
   const splitCurrentClip = () => {
     const clipToSplit = clips.find((c) => currentTime > c.start + 0.1 && currentTime < c.end - 0.1);
     if (!clipToSplit) return;
+    saveCurrentSnapshot();
 
     const firstHalf: VideoClip = {
       ...clipToSplit,
@@ -415,6 +498,7 @@ export function App() {
 
   // AI Prompt Bar Submission
   const handleAIPrompt = async (prompt: string) => {
+    saveCurrentSnapshot();
     setIsProcessing(true);
     const p = prompt.toLowerCase();
 
@@ -580,6 +664,7 @@ export function App() {
 
   // Human-in-the-Loop Selection: Apply selected song to generate full Attitude Reel
   const handleSelectTrendingSong = async (song: TrendingSong) => {
+    saveCurrentSnapshot();
     setIsApplyingReel(true);
     setProcessingStatus(`Crafting Attitude Reel with "${song.title}"...`);
 
@@ -704,6 +789,7 @@ export function App() {
     promptText = '10 photos attitude reel with trending song and transitions',
     songData?: TrendingSong
   ) => {
+    saveCurrentSnapshot();
     setIsProcessing(true);
     setProcessingStatus('AI Director assembling photo reel with 18 transitions & live trending audio...');
 
@@ -890,6 +976,30 @@ export function App() {
     }
   };
 
+  // Apply Reel from Simultaneous Multi-Asset AI Composer
+  const handleApplyMultiAssetReel = (plan: any) => {
+    if (!plan) return;
+    saveCurrentSnapshot();
+
+    if (plan.aspectRatio) setAspectRatio(plan.aspectRatio);
+    if (plan.duration) {
+      setDuration(plan.duration);
+      setCurrentTime(0);
+    }
+    if (plan.clips && plan.clips.length > 0) {
+      setClips(plan.clips);
+      setSelectedClipId(plan.clips[0].id);
+    }
+    if (plan.transitions && plan.transitions.length > 0) setTransitions(plan.transitions);
+    if (plan.subtitles && plan.subtitles.length > 0) setSubtitles(plan.subtitles);
+    if (plan.subtitleStyle) setSubtitleStyle(plan.subtitleStyle);
+    if (plan.colorGrading) setColorGrading(plan.colorGrading);
+    if (plan.effects) setEffects(plan.effects);
+    if (plan.audioTrack?.url) setReelAudioUrl(resolveAssetUrl(plan.audioTrack.url));
+    if (plan.uploadedPhotos && plan.uploadedPhotos.length > 0) setUserPhotos(plan.uploadedPhotos);
+    if (plan.summary) setAiSummary(plan.summary);
+  };
+
   // Batch Photo Upload Handler
   const handlePhotoBatchUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -978,9 +1088,14 @@ export function App() {
         onOpenVision={handleOpenVision}
         onOpenMusic={() => setIsTrendingPickerOpen(true)}
         onOpenSubtitleGallery={() => setIsSubtitleGalleryOpen(true)}
+        onOpenMultiComposer={() => setIsMultiComposerOpen(true)}
         onUploadClick={() => fileInputRef.current?.click()}
         isProcessing={isProcessing}
         processingStatus={processingStatus}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
       />
 
       {/* AI Prompt Input Bar */}
@@ -991,6 +1106,7 @@ export function App() {
         aiSummary={aiSummary}
         onUploadPhotos={() => photoInputRef.current?.click()}
         photosCount={userPhotos.length}
+        onOpenMultiComposer={() => setIsMultiComposerOpen(true)}
       />
 
       {/* Main Workspace Dynamic Page Body */}
@@ -1196,6 +1312,13 @@ export function App() {
         onSelectStyle={(newStyle) => {
           setSubtitleStyle(newStyle);
         }}
+      />
+
+      {/* Simultaneous Multi-Asset + Prompt AI Reel Composer Modal */}
+      <MultiAssetComposerModal
+        isOpen={isMultiComposerOpen}
+        onClose={() => setIsMultiComposerOpen(false)}
+        onApplyReel={handleApplyMultiAssetReel}
       />
 
       {/* Export / Deliver Master Modal */}

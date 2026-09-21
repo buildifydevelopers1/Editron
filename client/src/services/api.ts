@@ -321,3 +321,37 @@ export async function generateAIImage(
   }
   return data;
 }
+
+export async function generateMultiAssetReel({
+  files = [],
+  prompt = '20 sec viral attitude reel with most suitable part of song',
+  targetDuration = 20,
+  aspectRatio = '9:16',
+  songData,
+}: {
+  files?: File[];
+  prompt?: string;
+  targetDuration?: number;
+  aspectRatio?: string;
+  songData?: any;
+}): Promise<any> {
+  const formData = new FormData();
+  files.forEach((file) => formData.append('files', file));
+  formData.append('prompt', prompt);
+  formData.append('targetDuration', targetDuration.toString());
+  formData.append('aspectRatio', aspectRatio);
+  if (songData) {
+    formData.append('songData', JSON.stringify(songData));
+  }
+
+  const res = await fetch(`${API_BASE}/multi-asset-reel`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error || 'Failed to generate multi-asset reel');
+  }
+  return data.reelPlan;
+}
