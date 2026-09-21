@@ -10,6 +10,31 @@ import {
 
 export const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || '/api';
 
+/**
+ * Resolves an asset path to a valid browser URL, handling absolute URLs,
+ * local blob URLs, and prepending backend origin if VITE_API_BASE_URL is cross-origin.
+ */
+export function resolveAssetUrl(url: string | undefined | null): string {
+  if (!url) return '';
+  if (
+    url.startsWith('http://') ||
+    url.startsWith('https://') ||
+    url.startsWith('blob:') ||
+    url.startsWith('data:')
+  ) {
+    return url;
+  }
+  if (API_BASE.startsWith('http://') || API_BASE.startsWith('https://')) {
+    try {
+      const origin = new URL(API_BASE).origin;
+      return `${origin}${url.startsWith('/') ? '' : '/'}${url}`;
+    } catch {
+      // fallback
+    }
+  }
+  return url;
+}
+
 export async function fetchHealth() {
   const res = await fetch(`${API_BASE}/health`);
   return res.json();

@@ -39,10 +39,12 @@ import {
   requestSilenceDetection,
   requestTranscription,
   requestVisionAnalysis,
+  resolveAssetUrl,
   searchTrendingSongs,
   uploadPhotos,
   uploadVideoFile,
 } from './services/api';
+import { probeMediaFile } from './services/mediaMetadata';
 
 export function App() {
   // Navigation
@@ -349,29 +351,44 @@ export function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // 1. Instant local playback: create object URL so video plays immediately in browser
+    const localBlobUrl = URL.createObjectURL(file);
+    setVideoUrl(localBlobUrl);
+    setCurrentTime(0);
+
+    // 2. Client-side metadata probe
+    try {
+      const meta = await probeMediaFile(file);
+      if (meta.duration && meta.duration > 0) {
+        setDuration(meta.duration);
+        const initialClip: VideoClip = {
+          id: `clip-${Date.now()}`,
+          name: file.name,
+          trackId: 'v1',
+          start: 0,
+          end: meta.duration,
+          sourceStart: 0,
+          sourceEnd: meta.duration,
+          speed: 1.0,
+        };
+        setClips([initialClip]);
+        setSelectedClipId(initialClip.id);
+      }
+    } catch (metaErr) {
+      console.warn('Client probe warning:', metaErr);
+    }
+
     setIsProcessing(true);
-    setProcessingStatus('Uploading & probing video with FFmpeg...');
+    setProcessingStatus('Syncing video with AI engine...');
 
     try {
       const media = await uploadVideoFile(file);
-      setVideoUrl(media.videoUrl);
-      setVideoPath(media.videoPath);
-      setDuration(media.metadata.duration || 15);
-      setCurrentTime(0);
-
-      // Create initial timeline clip
-      const initialClip: VideoClip = {
-        id: `clip-${Date.now()}`,
-        name: media.originalName,
-        trackId: 'v1',
-        start: 0,
-        end: media.metadata.duration,
-        sourceStart: 0,
-        sourceEnd: media.metadata.duration,
-        speed: 1.0,
-      };
-      setClips([initialClip]);
-      setSelectedClipId(initialClip.id);
+      if (media.videoPath) {
+        setVideoPath(media.videoPath);
+      }
+      if (media.metadata?.duration) {
+        setDuration(media.metadata.duration);
+      }
 
       // Auto transcribe if audio was extracted
       if (media.audioPath) {
@@ -385,11 +402,8 @@ export function App() {
           console.warn('Transcription failed:', tErr);
         }
       }
-
-      setProcessingStatus('');
     } catch (err: any) {
-      console.error('Upload failed:', err);
-      alert(`Upload failed: ${err.message}`);
+      console.warn('Backend sync notice (continuing with client-side playback):', err.message);
     } finally {
       setIsProcessing(false);
       setProcessingStatus('');

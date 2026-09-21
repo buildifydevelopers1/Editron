@@ -165,3 +165,5 @@ export async function extractMediaMetadata(file: File): Promise<ClientMediaMetad
 
   return baseResult;
 }
+
+export const probeMediaFile = extractMediaMetadata;

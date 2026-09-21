@@ -12,7 +12,9 @@ import {
   Repeat,
   Tv,
   Sparkles,
-  Activity
+  Activity,
+  Film,
+  Upload
 } from 'lucide-react';
 import {
   AspectRatio,
@@ -73,6 +75,11 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isAudioUnlocked, setIsAudioUnlocked] = useState(audioEngine.isUnlocked);
   const [vuLevels, setVuLevels] = useState<{ left: number; right: number }>({ left: 0, right: 0 });
+  const [videoLoadError, setVideoLoadError] = useState(false);
+
+  useEffect(() => {
+    setVideoLoadError(false);
+  }, [videoUrl]);
 
   // Precision Responsive Viewport Rectangle (Exact Letterbox/Pillarbox Bounding Box)
   const viewportRect = useVideoViewport(stageContainerRef, aspectRatio);
@@ -390,6 +397,7 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
             <audio
               ref={audioRef}
               src={audioUrl}
+              crossOrigin="anonymous"
               muted={isMuted}
             />
           )}
@@ -410,6 +418,7 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
             <video
               ref={videoRef}
               src={videoUrl}
+              crossOrigin="anonymous"
               className="w-full h-full object-contain pointer-events-none transition-transform duration-75"
               style={{
                 filter: videoFilterStyle,
@@ -418,9 +427,43 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
               }}
               playsInline
               muted={isMuted}
+              onError={() => setVideoLoadError(true)}
               onTimeUpdate={(e) => onSeek(e.currentTarget.currentTime)}
               onEnded={() => onPlayPause()}
             />
+          )}
+
+          {/* Video Stream Load Error Fallback Overlay */}
+          {videoLoadError && (
+            <div className="absolute inset-0 bg-resolve-950/95 flex flex-col items-center justify-center p-6 text-center z-30 pointer-events-auto">
+              <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/40 flex items-center justify-center mb-3">
+                <Film className="w-6 h-6 text-amber-400" />
+              </div>
+              <h4 className="text-gray-200 font-bold text-sm mb-1">Video Stream Not Found or Unreachable</h4>
+              <p className="text-xs text-gray-400 max-w-sm mb-4">
+                The sample media file was not found on this deployment. Upload your video to start editing!
+              </p>
+              <label className="cursor-pointer bg-resolve-orange text-black px-4 py-2 rounded text-xs font-bold hover:bg-resolve-orange-hover transition flex items-center space-x-2 shadow-lg">
+                <Upload className="w-4 h-4" />
+                <span>Upload Local Video</span>
+                <input
+                  type="file"
+                  accept="video/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) {
+                      const localBlob = URL.createObjectURL(f);
+                      if (videoRef.current) {
+                        videoRef.current.src = localBlob;
+                      }
+                      setVideoLoadError(false);
+                      onSeek(0);
+                    }
+                  }}
+                />
+              </label>
+            </div>
           )}
 
           {/* TRANSITION OVERLAYS */}

@@ -6,8 +6,6 @@ server/node_modules
 *.log
 .env
 .env.local
-uploads/*
-!uploads/sample_editron.mp4
 outputs/*
 .DS_Store
 Thumbs.db

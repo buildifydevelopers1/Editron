@@ -52,8 +52,11 @@ COPY server/ ./server/
 # Copy built frontend from Stage 1 into client/dist (for all-in-one serving)
 COPY --from=frontend-builder /app/client/dist ./client/dist
 
+# Copy sample media assets (sample video and audio tracks)
+COPY uploads/ ./uploads/
+
 # Create storage directories for video uploads and final renders
-RUN mkdir -p server/uploads server/outputs uploads outputs
+RUN mkdir -p server/uploads server/outputs outputs
 
 # Expose server port (Render will bind to $PORT dynamically)
 EXPOSE 3001

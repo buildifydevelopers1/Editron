@@ -17,9 +17,42 @@ app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
-// Static file directories for video uploads & exports
-app.use('/uploads', express.static(config.get('uploadDir')));
-app.use('/outputs', express.static(config.get('outputDir')));
+// Static file directories for video uploads & exports with explicit CORS headers
+const uploadDir = config.get('uploadDir');
+const outputDir = config.get('outputDir');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+
+// Auto-seed sample media into uploadDir if not present (handles fresh Render persistent disks)
+const sampleVideoPath = path.join(uploadDir, 'sample_editron.mp4');
+if (!fs.existsSync(sampleVideoPath)) {
+  const candidateSeeds = [
+    path.join(__dirname, '../client/public/uploads'),
+    path.join(__dirname, '../client/dist/uploads'),
+    path.join(__dirname, '../../client/public/uploads')
+  ];
+  for (const seedDir of candidateSeeds) {
+    if (fs.existsSync(seedDir)) {
+      try {
+        const files = fs.readdirSync(seedDir);
+        for (const file of files) {
+          const src = path.join(seedDir, file);
+          const dest = path.join(uploadDir, file);
+          if (!fs.existsSync(dest) && fs.statSync(src).isFile()) {
+            fs.copyFileSync(src, dest);
+          }
+        }
+        console.log(`✅ Auto-seeded ${files.length} sample media assets into ${uploadDir}`);
+        break;
+      } catch (err) {
+        console.warn('Auto-seed notice:', err.message);
+      }
+    }
+  }
+}
+
+app.use('/uploads', cors(), express.static(uploadDir));
+app.use('/outputs', cors(), express.static(outputDir));
 
 // Routes
 app.use('/api', apiRouter);
@@ -29,6 +62,10 @@ const clientDistPath = path.join(__dirname, '../client/dist');
 if (fs.existsSync(clientDistPath)) {
   app.use(express.static(clientDistPath));
   app.get('*', (req, res) => {
+    // Guard against returning index.html for missing asset or api routes
+    if (req.path.startsWith('/uploads/') || req.path.startsWith('/outputs/') || req.path.startsWith('/api/')) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
     res.sendFile(path.join(clientDistPath, 'index.html'));
   });
 }
