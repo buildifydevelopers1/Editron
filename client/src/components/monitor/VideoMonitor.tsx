@@ -283,29 +283,72 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
     shakeY = Math.cos(currentTime * 28) * intensity;
   }
 
-  // Motion Transitions dynamic offsets
+  // Motion Transitions dynamic offsets & transforms
   let transScale = 1.0;
   let transPosX = 0;
+  let transPosY = 0;
   let transRot = 0;
+  let transRotY = 0;
+  let transOpacity = 1.0;
+  let transExtraFilter = '';
+
   if (activeTransition) {
-    if (activeTransition.type === 'zoom_blur') {
-      transScale = 1.0 + Math.sin(transProgress * Math.PI) * 0.35;
-    } else if (activeTransition.type === 'whip_pan') {
-      transPosX = (transProgress - 0.5) * 350;
-    } else if (activeTransition.type === 'spin') {
-      transRot = transProgress * 360;
+    const t = transProgress;
+    const peak = Math.sin(t * Math.PI);
+
+    switch (activeTransition.type) {
+      case 'zoom_blur':
+        transScale = 1.0 + peak * 0.45;
+        transExtraFilter = ` blur(${peak * 6}px)`;
+        break;
+      case 'whip_pan':
+        transPosX = (t - 0.5) * 450;
+        break;
+      case 'spin':
+        transRot = t * 360;
+        transScale = 1.0 - peak * 0.25;
+        break;
+      case 'cube_flip':
+        transRotY = (t - 0.5) * 180;
+        transScale = 1.0 - peak * 0.2;
+        break;
+      case 'push_slide':
+        transPosX = (t - 0.5) * 380;
+        break;
+      case 'cross_zoom':
+        transScale = 1.0 + peak * 0.7;
+        break;
+      case 'shake_impact':
+        shakeX += Math.sin(t * 45) * 18;
+        shakeY += Math.cos(t * 35) * 12;
+        break;
+      case 'pixelate':
+        transExtraFilter = ` blur(${peak * 10}px) contrast(${1.0 + peak * 0.4})`;
+        break;
+      case 'rgb_split':
+        transExtraFilter = ` drop-shadow(-${peak * 8}px 0 red) drop-shadow(${peak * 8}px 0 cyan)`;
+        break;
+      case 'dissolve':
+      case 'cross_dissolve':
+        transOpacity = 1.0 - Math.abs(t - 0.5) * 0.5;
+        break;
+      case 'page_curl':
+        transRot = (t - 0.5) * 35;
+        transPosX = (t - 0.5) * 220;
+        break;
     }
   }
 
   const finalScale = transform.scale * transScale;
   const finalPosX = transform.positionX + shakeX + transPosX;
-  const finalPosY = transform.positionY + shakeY;
+  const finalPosY = transform.positionY + shakeY + transPosY;
   const finalRot = transform.rotation + transRot;
 
   let extraFilters = '';
   if (glow) {
     extraFilters += ` drop-shadow(0 0 ${(glow.intensity / 6).toFixed(1)}px rgba(255,255,255,0.7))`;
   }
+  extraFilters += transExtraFilter;
   const videoFilterStyle = `contrast(${contrast}) saturate(${saturation}) brightness(${brightness}) sepia(${sepia}) hue-rotate(${hueRotate}deg)${extraFilters}`;
 
   // Find active subtitle words at current time
@@ -470,6 +513,7 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
           {/* Audio BGM Track (Secondary Audio Channel / Photo Montage Master Track) */}
           {audioUrl && (
             <audio
+              key={audioUrl}
               ref={audioRef}
               src={audioUrl}
               preload="auto"
@@ -558,11 +602,26 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
             />
           )}
 
+          {/* TRANSITION VISUAL OVERLAYS */}
+          {activeTransition?.type === 'dip_white' && (
+            <div
+              className="absolute inset-0 bg-white pointer-events-none z-30 transition-opacity"
+              style={{ opacity: Math.sin(transProgress * Math.PI) }}
+            />
+          )}
+
+          {activeTransition?.type === 'dip_black' && (
+            <div
+              className="absolute inset-0 bg-black pointer-events-none z-30 transition-opacity"
+              style={{ opacity: Math.sin(transProgress * Math.PI) }}
+            />
+          )}
+
           {activeTransition?.type === 'film_burn' && (
             <div
               className="absolute inset-0 pointer-events-none z-30 mix-blend-screen"
               style={{
-                background: 'radial-gradient(circle at 40% 50%, rgba(255,140,0,0.9) 0%, rgba(255,40,0,0.5) 45%, transparent 80%)',
+                background: 'radial-gradient(circle at 40% 50%, rgba(255,140,0,0.95) 0%, rgba(255,40,0,0.6) 45%, transparent 80%)',
                 opacity: Math.sin(transProgress * Math.PI),
               }}
             />
@@ -570,10 +629,39 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
 
           {activeTransition?.type === 'glitch' && (
             <div
-              className="absolute inset-0 pointer-events-none z-30 mix-blend-difference opacity-75"
+              className="absolute inset-0 pointer-events-none z-30 mix-blend-difference opacity-80"
               style={{
-                background: 'repeating-linear-gradient(0deg, rgba(0,255,255,0.6) 0px, transparent 2px, rgba(255,0,128,0.6) 4px, transparent 6px)',
-                transform: `translateX(${Math.sin(currentTime * 80) * 18}px)`,
+                background: 'repeating-linear-gradient(0deg, rgba(0,255,255,0.7) 0px, transparent 2px, rgba(255,0,128,0.7) 4px, transparent 6px)',
+                transform: `translateX(${Math.sin(currentTime * 80) * 20}px)`,
+              }}
+            />
+          )}
+
+          {activeTransition?.type === 'lens_flare' && (
+            <div
+              className="absolute inset-0 pointer-events-none z-30 flex items-center justify-center mix-blend-screen"
+              style={{ opacity: Math.sin(transProgress * Math.PI) * 0.95 }}
+            >
+              <div className="w-full h-8 bg-gradient-to-r from-transparent via-cyan-400 to-transparent blur-md transform rotate-12" />
+              <div className="w-48 h-48 rounded-full bg-amber-400/60 blur-xl absolute" />
+            </div>
+          )}
+
+          {activeTransition?.type === 'iris_wipe' && (
+            <div
+              className="absolute inset-0 pointer-events-none z-30 bg-black"
+              style={{
+                clipPath: `circle(${Math.max(0, 100 - Math.sin(transProgress * Math.PI) * 100)}% at 50% 50%)`,
+              }}
+            />
+          )}
+
+          {activeTransition?.type === 'split_slice' && (
+            <div
+              className="absolute inset-0 pointer-events-none z-30 mix-blend-multiply opacity-60"
+              style={{
+                background: 'repeating-linear-gradient(90deg, rgba(0,0,0,0.7) 0px, transparent 8px, rgba(0,0,0,0.7) 16px)',
+                transform: `translateX(${(transProgress - 0.5) * 120}px)`,
               }}
             />
           )}
@@ -638,7 +726,7 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
             </div>
           )}
 
-          {/* DYNAMIC SUBTITLES OVERLAY */}
+          {/* DYNAMIC SUBTITLES OVERLAY (18+ Viral Styles) */}
           {currentWords.length > 0 && (
             <div
               className="absolute left-0 right-0 flex justify-center items-center pointer-events-none z-30 px-4"
@@ -647,6 +735,10 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
               <div
                 className={`flex flex-wrap justify-center items-center gap-1.5 font-bold tracking-wide transition-all ${
                   subtitleStyle.textCase === 'uppercase' ? 'uppercase' : ''
+                } ${
+                  subtitleStyle.preset === 'documentary_italic' ? 'italic bg-black/70 px-4 py-1.5 rounded' : ''
+                } ${
+                  subtitleStyle.preset === 'news_lower_third' ? 'bg-[#0F172A] border-l-4 border-red-500 px-4 py-1 rounded shadow-xl' : ''
                 }`}
                 style={{
                   fontFamily: subtitleStyle.fontFamily,
@@ -662,16 +754,50 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
                       ? 'anim-pop'
                       : '';
 
+                  // Dynamic preset shadow & stroke calculations
+                  let customTextShadow = '0 2px 4px rgba(0,0,0,0.9)';
+                  if (subtitleStyle.preset === 'neon_cyberpunk') {
+                    customTextShadow = isCurrent
+                      ? '0 0 15px #00F0FF, 0 0 30px #FF007F'
+                      : '0 0 8px rgba(0,240,255,0.4)';
+                  } else if (subtitleStyle.preset === 'retro_vhs') {
+                    customTextShadow = '-2px 0 #FF0055, 2px 0 #00FFFF, 0 2px 4px rgba(0,0,0,0.9)';
+                  } else if (subtitleStyle.preset === 'comic_pop') {
+                    customTextShadow = '3px 3px 0 #FF0033, 0 2px 4px rgba(0,0,0,0.9)';
+                  } else if (subtitleStyle.preset === 'golden_luxury') {
+                    customTextShadow = isCurrent
+                      ? '0 0 16px rgba(255,215,0,0.8), 0 2px 4px rgba(0,0,0,0.9)'
+                      : '0 2px 4px rgba(0,0,0,0.9)';
+                  } else if (subtitleStyle.preset === 'typewriter') {
+                    customTextShadow = '0 0 8px #00FF66';
+                  } else if (subtitleStyle.preset === 'fire_gradient') {
+                    customTextShadow = '0 0 18px #FF4500, 0 2px 4px rgba(0,0,0,0.9)';
+                  } else if (subtitleStyle.preset === 'isometric_3d') {
+                    customTextShadow = '1px 1px 0 #000, 2px 2px 0 #000, 3px 3px 0 #000, 4px 4px 0 #000';
+                  } else if (subtitleStyle.preset === 'drop_shadow_studio') {
+                    customTextShadow = '0 8px 16px rgba(0,0,0,0.95)';
+                  } else if (isCurrent) {
+                    customTextShadow = `0 0 14px ${subtitleStyle.highlightColor}80, 0 2px 4px rgba(0,0,0,0.9)`;
+                  }
+
+                  const isBoxedPill = subtitleStyle.preset === 'boxed_pill' && isCurrent;
+
                   return (
                     <span
                       key={word.id}
-                      className={`transition-colors duration-75 ${animClass}`}
+                      className={`transition-all duration-75 ${animClass} ${
+                        isBoxedPill ? 'bg-amber-400 text-black px-2 py-0.5 rounded-md shadow-lg' : ''
+                      }`}
                       style={{
-                        color: isCurrent ? subtitleStyle.highlightColor : subtitleStyle.textColor,
-                        WebkitTextStroke: `${subtitleStyle.strokeWidth}px ${subtitleStyle.strokeColor}`,
-                        textShadow: isCurrent
-                          ? `0 0 12px ${subtitleStyle.highlightColor}66, 0 2px 4px rgba(0,0,0,0.9)`
-                          : '0 2px 4px rgba(0,0,0,0.9)',
+                        color: isBoxedPill
+                          ? '#000000'
+                          : isCurrent
+                          ? subtitleStyle.highlightColor
+                          : subtitleStyle.textColor,
+                        WebkitTextStroke: isBoxedPill
+                          ? '0px transparent'
+                          : `${subtitleStyle.strokeWidth}px ${subtitleStyle.strokeColor}`,
+                        textShadow: isBoxedPill ? 'none' : customTextShadow,
                       }}
                     >
                       {word.word}

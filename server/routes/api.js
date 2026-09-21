@@ -286,15 +286,21 @@ router.post('/trending-audio/search', async (req, res) => {
  */
 router.post('/trending-audio/apply-attitude-reel', async (req, res) => {
   try {
-    const { songId, duration = 12 } = req.body;
-    const catalog = TrendingAudioService.getTrendingCatalog();
-    const selectedSong = catalog.find(s => s.id === songId) || catalog[0];
+    const { songId, songData, duration = 12 } = req.body;
+    let selectedSong = songData;
+    if (!selectedSong) {
+      const catalog = TrendingAudioService.getTrendingCatalog();
+      selectedSong = catalog.find(s => s.id === songId) || catalog[0];
+    }
+
+    const dropTime = selectedSong.dropTime || 3.2;
+    const soundUrl = selectedSong.audioUrl || selectedSong.previewUrl || `/uploads/${selectedSong.audioFileName || 'elevated_attitude_beat.mp3'}`;
 
     // Build the complete Attitude Reel edit specification
     const attitudeReel = {
       song: selectedSong,
       aspectRatio: '9:16', // Instagram Reel / YouTube Shorts standard
-      summary: `Applied "${selectedSong.title}" by ${selectedSong.artist}. Auto-configured 9:16 vertical framing, high-contrast attitude color grade, dynamic beat-drop punch-in at ${selectedSong.dropTime}s, and aggressive Hormozi subtitles.`,
+      summary: `Applied "${selectedSong.title}" by ${selectedSong.artist}. Auto-configured 9:16 vertical framing, high-contrast attitude color grade, dynamic beat-drop punch-in at ${dropTime}s, and aggressive Hormozi subtitles.`,
       colorGrading: {
         presetName: 'Attitude Reel Contrast',
         temperature: 12,
@@ -322,29 +328,29 @@ router.post('/trending-audio/apply-attitude-reel', async (req, res) => {
       cuts: [
         {
           start: 0.0,
-          end: selectedSong.dropTime,
+          end: dropTime,
           label: 'Attitude Build-up',
           speed: 1.0
         },
         {
-          start: selectedSong.dropTime,
+          start: dropTime,
           end: duration,
           label: '🔥 BASS DROP CLIMAX',
           speed: 1.0
         }
       ],
       audioTrack: {
-        id: `a2-${selectedSong.id}-${Date.now()}`,
+        id: `a2-${selectedSong.id || Date.now()}`,
         name: `${selectedSong.title} (Reel BGM)`,
         trackId: 'a2',
         start: 0.0,
         end: duration,
-        volume: 0.85,
-        url: `/uploads/${selectedSong.audioFileName}`
+        volume: 0.95,
+        url: soundUrl
       },
       zooms: [
         {
-          timestamp: selectedSong.dropTime,
+          timestamp: dropTime,
           duration: 1.8,
           scale: 1.25,
           anchor: 'center',
@@ -395,7 +401,7 @@ router.post('/upload-photos', upload.array('photos', 20), async (req, res) => {
  */
 router.post('/photos-to-reel', async (req, res) => {
   try {
-    const { photos = [], prompt = 'attitude reel', songId = 'trend-hindi-1' } = req.body;
+    const { photos = [], prompt = 'attitude reel', songId = 'trend-hindi-1', songData } = req.body;
     
     // Require real uploaded user photos (no mock bypass)
     if (!photos || photos.length < 2) {
@@ -403,8 +409,11 @@ router.post('/photos-to-reel', async (req, res) => {
     }
     const photoList = photos;
 
-    const catalog = TrendingAudioService.getTrendingCatalog();
-    const song = catalog.find(s => s.id === songId) || catalog[0];
+    let song = songData;
+    if (!song) {
+      const catalog = TrendingAudioService.getTrendingCatalog();
+      song = catalog.find(s => s.id === songId) || catalog[0];
+    }
 
     // Pacing: 1.2s per photo (total 12 seconds for 10 photos)
     const photoDuration = 1.2;
@@ -531,7 +540,7 @@ router.post('/photos-to-reel', async (req, res) => {
         start: 0,
         end: totalDuration,
         volume: 0.9,
-        url: `/uploads/${song.audioFileName}`
+        url: song.audioUrl || song.previewUrl || `/uploads/${song.audioFileName || 'elevated_attitude_beat.mp3'}`
       },
       song
     };

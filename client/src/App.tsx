@@ -13,6 +13,7 @@ import { ExportModal } from './components/export/ExportModal';
 import { VisionAnalysisModal } from './components/vision/VisionAnalysisModal';
 import { AssetLibraryPanel } from './components/media/AssetLibraryPanel';
 import { TrendingSongPickerModal } from './components/audio/TrendingSongPickerModal';
+import { SubtitleStyleGalleryModal } from './components/subtitles/SubtitleStyleGalleryModal';
 import { EffectsPanel } from './components/effects/EffectsPanel';
 import {
   AppConfig,
@@ -59,6 +60,7 @@ export function App() {
   const [trendingSongs, setTrendingSongs] = useState<TrendingSong[]>([]);
   const [trendingQuery, setTrendingQuery] = useState('trending attitude hindi song');
   const [isApplyingReel, setIsApplyingReel] = useState(false);
+  const [isSubtitleGalleryOpen, setIsSubtitleGalleryOpen] = useState(false);
 
   // Vision Analysis State
   const [visionFrames, setVisionFrames] = useState<KeyframeItem[]>([]);
@@ -416,108 +418,6 @@ export function App() {
     setIsProcessing(true);
     const p = prompt.toLowerCase();
 
-    // Check if user requested photo montage / 10 photos attitude reel
-    if (
-      p.includes('photo') ||
-      p.includes('image') ||
-      p.includes('montage') ||
-      (userPhotos.length > 0 && (p.includes('reel') || p.includes('attitude')))
-    ) {
-      await handlePhotosToReel(userPhotos);
-      return;
-    }
-
-    // Check if user requested a trending song / attitude reel (Human-In-The-Loop Flow)
-    if (
-      p.includes('attitude') ||
-      p.includes('trending') ||
-      p.includes('song') ||
-      p.includes('hindi') ||
-      p.includes('music') ||
-      p.includes('reel')
-    ) {
-      setProcessingStatus('Scanning internet charts for trending attitude tracks...');
-      try {
-        const songs = await searchTrendingSongs(prompt);
-        if (songs && songs.length > 0) {
-          setTrendingSongs(songs);
-          setTrendingQuery(prompt);
-          setIsTrendingPickerOpen(true);
-          setIsProcessing(false);
-          setProcessingStatus('');
-          return;
-        }
-      } catch (err) {
-        console.warn('Trending search fallback to local library:', err);
-      }
-
-      // Offline / Demo Fallback: Load curated viral Attitude Hindi songs directly
-      const fallbackSongs: TrendingSong[] = [
-        {
-          id: 'trend-hindi-1',
-          title: 'Elevated (Attitude Bass Mix)',
-          artist: 'Shubh',
-          genre: 'Hindi / Punjabi Hip-Hop',
-          vibe: 'Raw Attitude & Confidence',
-          trendScore: '🔥 3.8M Reels • Trending #1',
-          bpm: 130,
-          dropTime: 3.2,
-          thumbnailUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80',
-          audioUrl: '/uploads/elevated_attitude_beat.mp3',
-          audioFileName: 'elevated_attitude_beat.mp3',
-          description: 'Hard-hitting 808 bass slides, punchy trap claps, and confident swagger.'
-        },
-        {
-          id: 'trend-hindi-2',
-          title: 'Baller (Gangster Phonk Cut)',
-          artist: 'Shubh & Ikky',
-          genre: 'Desi Trap / Drill',
-          vibe: 'High Energy Boss Walk',
-          trendScore: '🔥 2.4M Reels • Trending #2',
-          bpm: 140,
-          dropTime: 2.8,
-          thumbnailUrl: 'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=300&q=80',
-          audioUrl: '/uploads/baller_desi_trap.mp3',
-          audioFileName: 'baller_desi_trap.mp3',
-          description: 'Aggressive brass stabs, heavy distortion sub-bass, and rapid hi-hats.'
-        },
-        {
-          id: 'trend-hindi-3',
-          title: 'Dafa 406 (Desi Haryanvi Swag)',
-          artist: 'Chhotu Shikari / Viral Reel Anthem',
-          genre: 'Haryanvi / Hindi Folk Drill',
-          vibe: 'Unapologetic Desi Attitude',
-          trendScore: '🔥 4.5M Reels • Viral Anthem',
-          bpm: 134,
-          dropTime: 4.1,
-          thumbnailUrl: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=300&q=80',
-          audioUrl: '/uploads/dafa_406_anthem.mp3',
-          audioFileName: 'dafa_406_anthem.mp3',
-          description: 'Iconic viral trending hook, infectious rhythm, and dramatic drop.'
-        },
-        {
-          id: 'trend-hindi-4',
-          title: 'Big Dawgs (Desi Bass Crossover)',
-          artist: 'Hanumankind & Kalmi',
-          genre: 'Hardcore Underground Hip-Hop',
-          vibe: 'Untouchable Energy & Alpha Vibe',
-          trendScore: '🔥 5.1M Reels • Global Phenomenon',
-          bpm: 145,
-          dropTime: 3.6,
-          thumbnailUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80',
-          audioUrl: '/uploads/big_dawgs_cut.mp3',
-          audioFileName: 'big_dawgs_cut.mp3',
-          description: 'Relentless fast flow, massive 808 kick drum, and intense cinematic tension.'
-        }
-      ];
-      setTrendingSongs(fallbackSongs);
-      setTrendingQuery(prompt);
-      setIsTrendingPickerOpen(true);
-      setIsProcessing(false);
-      setProcessingStatus('');
-      return;
-    }
-
     // Check if user requested auto-cutting silences / jump cuts
     if (
       p.includes('silence') ||
@@ -554,6 +454,20 @@ export function App() {
       }
     }
 
+    // Check if user explicitly requested photo montage / 10 photos attitude reel
+    if (p.includes('photo') || p.includes('image') || p.includes('montage')) {
+      if (userPhotos.length === 0) {
+        setIsProcessing(false);
+        setProcessingStatus('');
+        setAiSummary('Please select photos from your device to assemble the AI photo reel.');
+        photoInputRef.current?.click();
+        return;
+      }
+      await handlePhotosToReel(userPhotos, undefined, prompt);
+      return;
+    }
+
+    // Direct AI Reasoning via configured model (gpt-oss-120b)
     setProcessingStatus(`Consulting AI Director (${config?.llmModel || 'gpt-oss-120b'})...`);
 
     try {
@@ -568,6 +482,11 @@ export function App() {
           setAiSummary(plan.summary);
         }
 
+        // Apply Aspect Ratio
+        if (plan.aspectRatio) {
+          setAspectRatio(plan.aspectRatio);
+        }
+
         // Apply Color Grading
         if (plan.colorGrading) {
           setColorGrading((prev) => ({
@@ -576,7 +495,7 @@ export function App() {
           }));
         }
 
-        // Apply Subtitle Style
+        // Apply Subtitle Style (from all 18 presets)
         if (plan.subtitleStyle) {
           setSubtitleStyle((prev) => ({
             ...prev,
@@ -584,8 +503,19 @@ export function App() {
           }));
         }
 
-        // Apply Smart Cuts
-        if (plan.cuts && plan.cuts.length > 0) {
+        // Apply Transitions (from all 18 cinematic transitions)
+        if (plan.transitions && plan.transitions.length > 0) {
+          setTransitions(plan.transitions);
+        }
+
+        // Apply OpenFX Effects
+        if (plan.effects && plan.effects.length > 0) {
+          setEffects(plan.effects);
+        }
+
+        // Apply Smart Cuts (only replace clips if not a photo montage, preserving user photos!)
+        const isPhotoTimeline = clips.some((c) => c.type === 'image');
+        if (!isPhotoTimeline && plan.cuts && plan.cuts.length > 0) {
           const newClips: VideoClip[] = plan.cuts.map((c: any, i: number) => ({
             id: `ai-clip-${i}-${Date.now()}`,
             name: c.label || `Cut ${i + 1}`,
@@ -600,12 +530,43 @@ export function App() {
           setSelectedClipId(newClips[0]?.id || null);
         }
 
-        // Apply Zoom punch-in if requested
+        // Apply Zoom punch-in
         if (plan.zooms && plan.zooms.length > 0) {
           setTransform((prev) => ({
             ...prev,
             scale: plan.zooms[0].scale || 1.15,
           }));
+        }
+
+        // Live Internet Music Query Handling
+        const musicQuery = plan.musicQuery || (
+          p.includes('song') || p.includes('music') || p.includes('hindi') || p.includes('punjabi') || p.includes('attitude') || p.includes('beat') || p.includes('audio')
+            ? prompt
+            : null
+        );
+
+        if (musicQuery) {
+          setProcessingStatus(`Searching live internet music for "${musicQuery}"...`);
+          try {
+            const liveSongs = await searchTrendingSongs(musicQuery);
+            if (liveSongs && liveSongs.length > 0) {
+              setTrendingSongs(liveSongs);
+              setTrendingQuery(musicQuery);
+
+              // Auto-apply top live song
+              const topSong = liveSongs[0];
+              const soundUrl = topSong.previewUrl || resolveAssetUrl(topSong.audioUrl || (topSong.audioFileName ? `/uploads/${topSong.audioFileName}` : undefined));
+              if (soundUrl) {
+                setReelAudioUrl(soundUrl);
+              }
+
+              if (p.includes('picker') || p.includes('choose song') || p.includes('select song') || p.includes('show songs')) {
+                setIsTrendingPickerOpen(true);
+              }
+            }
+          } catch (mErr) {
+            console.warn('Live music search notice:', mErr);
+          }
         }
       }
     } catch (err: any) {
@@ -621,6 +582,8 @@ export function App() {
   const handleSelectTrendingSong = async (song: TrendingSong) => {
     setIsApplyingReel(true);
     setProcessingStatus(`Crafting Attitude Reel with "${song.title}"...`);
+
+    const soundUrl = song.previewUrl || resolveAssetUrl(song.audioUrl || (song.audioFileName ? `/uploads/${song.audioFileName}` : '/uploads/elevated_attitude_beat.mp3'));
 
     const applyLocalReel = () => {
       setAspectRatio('9:16');
@@ -648,53 +611,55 @@ export function App() {
         animation: 'bounce',
         positionY: 22
       });
-      setAiSummary(`Applied "${song.title}" by ${song.artist}. Auto-configured 9:16 vertical framing, high-contrast attitude color grade, dynamic beat-drop punch-in at ${song.dropTime || 3.2}s, and aggressive Hormozi subtitles.`);
+      setAiSummary(`Applied "${song.title}" by ${song.artist} directly from live internet stream. Configured 9:16 vertical framing, beat-drop punch-in at ${song.dropTime || 3.2}s, and aggressive Hormozi subtitles.`);
 
-      const dropTime = song.dropTime || 3.2;
-      const newClips: VideoClip[] = [
-        {
-          id: `reel-cut-1-${Date.now()}`,
-          name: 'Attitude Build-up',
-          trackId: 'v1',
-          start: 0.0,
-          end: dropTime,
-          sourceStart: 0.0,
-          sourceEnd: dropTime,
-          speed: 1.0,
-        },
-        {
-          id: `reel-cut-2-${Date.now()}`,
-          name: '🔥 BASS DROP CLIMAX',
-          trackId: 'v1',
-          start: dropTime,
-          end: duration,
-          sourceStart: dropTime,
-          sourceEnd: duration,
-          speed: 1.0,
-        }
-      ];
-      setClips(newClips);
-      setSelectedClipId(newClips[0]?.id || null);
+      // Only re-cut if video timeline, never wipe user's photo montage!
+      if (!clips.some((c) => c.type === 'image')) {
+        const dropTime = song.dropTime || 3.2;
+        const newClips: VideoClip[] = [
+          {
+            id: `reel-cut-1-${Date.now()}`,
+            name: 'Attitude Build-up',
+            trackId: 'v1',
+            start: 0.0,
+            end: dropTime,
+            sourceStart: 0.0,
+            sourceEnd: dropTime,
+            speed: 1.0,
+          },
+          {
+            id: `reel-cut-2-${Date.now()}`,
+            name: '🔥 BASS DROP CLIMAX',
+            trackId: 'v1',
+            start: dropTime,
+            end: duration,
+            sourceStart: dropTime,
+            sourceEnd: duration,
+            speed: 1.0,
+          }
+        ];
+        setClips(newClips);
+        setSelectedClipId(newClips[0]?.id || null);
+      }
 
       setTransform((prev) => ({
         ...prev,
         scale: 1.25,
       }));
 
-      const rawAudioUrl = song.audioUrl || `/uploads/${song.audioFileName}`;
-      setReelAudioUrl(resolveAssetUrl(rawAudioUrl));
+      setReelAudioUrl(soundUrl);
       setIsTrendingPickerOpen(false);
     };
 
     try {
-      const reel = await applyAttitudeReel({ songId: song.id, duration });
+      const reel = await applyAttitudeReel({ songId: song.id, duration, songData: song });
       if (reel) {
         setAspectRatio('9:16');
-        setColorGrading(reel.colorGrading);
-        setSubtitleStyle(reel.subtitleStyle);
-        setAiSummary(reel.summary);
+        if (reel.colorGrading) setColorGrading(reel.colorGrading);
+        if (reel.subtitleStyle) setSubtitleStyle(reel.subtitleStyle);
+        if (reel.summary) setAiSummary(reel.summary);
 
-        if (reel.cuts && reel.cuts.length > 0) {
+        if (!clips.some((c) => c.type === 'image') && reel.cuts && reel.cuts.length > 0) {
           const newClips: VideoClip[] = reel.cuts.map((c: any, i: number) => ({
             id: `reel-cut-${i}-${Date.now()}`,
             name: c.label || `Beat Cut ${i + 1}`,
@@ -717,16 +682,14 @@ export function App() {
           }));
         }
 
-        if (reel.audioTrack?.url) {
-          setReelAudioUrl(resolveAssetUrl(reel.audioTrack.url));
-        }
-
+        const finalAudioUrl = reel.audioTrack?.url ? resolveAssetUrl(reel.audioTrack.url) : soundUrl;
+        setReelAudioUrl(finalAudioUrl);
         setIsTrendingPickerOpen(false);
       } else {
         applyLocalReel();
       }
     } catch (err: any) {
-      console.warn('Backend attitude reel fallback (applying offline reel):', err.message);
+      console.warn('Backend attitude reel fallback (applying live stream locally):', err.message);
       applyLocalReel();
     } finally {
       setIsApplyingReel(false);
@@ -735,9 +698,14 @@ export function App() {
   };
 
   // Handle 10-Photos to Attitude Reel Montage
-  const handlePhotosToReel = async (uploadedPhotos?: any[], songId = 'trend-hindi-1') => {
+  const handlePhotosToReel = async (
+    uploadedPhotos?: any[],
+    songId = 'trend-hindi-1',
+    promptText = '10 photos attitude reel with trending song and transitions',
+    songData?: TrendingSong
+  ) => {
     setIsProcessing(true);
-    setProcessingStatus('AI Director assembling 10-photo attitude reel with beat drops & transitions...');
+    setProcessingStatus('AI Director assembling photo reel with 18 transitions & live trending audio...');
 
     const targetPhotos = (uploadedPhotos && uploadedPhotos.length > 0) ? uploadedPhotos : userPhotos;
 
@@ -748,18 +716,26 @@ export function App() {
       return;
     }
 
-    // Offline / Local Photo Montage Assembler (works with zero API keys or backend offline)
-    const assembleLocalPhotoReel = () => {
+    // Offline / Local Photo Montage Assembler with all 18 Transitions
+    const assembleLocalPhotoReel = (activeSong?: TrendingSong) => {
       const photoDuration = 1.2;
       const totalDuration = targetPhotos.length * photoDuration;
 
-      const transitionTypes = [
-        { type: 'whip_pan' as const, name: 'Whip Pan' },
-        { type: 'zoom_blur' as const, name: 'Zoom Blur' },
-        { type: 'dip_white' as const, name: 'Flash Shutter' },
-        { type: 'glitch' as const, name: 'Cyber Glitch' },
-        { type: 'film_burn' as const, name: 'Film Burn' },
-        { type: 'spin' as const, name: 'Warp Spin' }
+      const transitionTypes: { type: any; name: string }[] = [
+        { type: 'whip_pan', name: 'Whip Pan' },
+        { type: 'zoom_blur', name: 'Zoom Blur' },
+        { type: 'dip_white', name: 'Flash Shutter' },
+        { type: 'glitch', name: 'Cyber Glitch' },
+        { type: 'film_burn', name: 'Film Burn' },
+        { type: 'spin', name: 'Warp Spin' },
+        { type: 'cube_flip', name: '3D Cube Flip' },
+        { type: 'shake_impact', name: 'Shake Impact' },
+        { type: 'rgb_split', name: 'RGB Split' },
+        { type: 'cross_zoom', name: 'Cross Zoom' },
+        { type: 'iris_wipe', name: 'Iris Wipe' },
+        { type: 'split_slice', name: 'Split Slice' },
+        { type: 'pixelate', name: 'Pixelate' },
+        { type: 'lens_flare', name: 'Lens Flare' }
       ];
 
       const attitudeCaptions = [
@@ -861,15 +837,31 @@ export function App() {
         { id: 'fx-letterbox', type: 'cinematic_letterbox', name: '2.39:1 Cinema Letterbox', enabled: false, intensity: 100 },
         { id: 'fx-split', type: 'rgb_split', name: 'RGB Chromatic Aberration', enabled: true, intensity: 20 }
       ]);
-      setReelAudioUrl(resolveAssetUrl('/uploads/elevated_attitude_beat.mp3'));
-      setAiSummary(`Successfully compiled ${targetPhotos.length}-Photo Attitude Reel in 9:16 vertical ratio synced to Elevated Attitude Beat with beat-drop transitions and Hormozi captions.`);
+
+      const audioSource = activeSong?.previewUrl || activeSong?.audioUrl || (activeSong?.audioFileName ? `/uploads/${activeSong.audioFileName}` : '/uploads/elevated_attitude_beat.mp3');
+      setReelAudioUrl(resolveAssetUrl(audioSource));
+      setAiSummary(`Compiled ${targetPhotos.length}-Photo Attitude Reel in 9:16 vertical ratio with cinematic transitions & Hormozi captions.`);
     };
 
     try {
+      let targetSong = songData;
+      if (!targetSong) {
+        try {
+          const liveSongs = await searchTrendingSongs('trending attitude hindi song');
+          if (liveSongs && liveSongs.length > 0) {
+            targetSong = liveSongs[0];
+            setTrendingSongs(liveSongs);
+          }
+        } catch (err) {
+          console.warn('Trending search fallback:', err);
+        }
+      }
+
       const montage = await generatePhotosToReel({
         photos: targetPhotos,
-        prompt: '10 photos attitude reel with trending song and transitions',
+        prompt: promptText,
         songId,
+        songData: targetSong,
       });
 
       if (montage) {
@@ -883,10 +875,11 @@ export function App() {
         if (montage.colorGrading) setColorGrading(montage.colorGrading);
         if (montage.subtitleStyle) setSubtitleStyle(montage.subtitleStyle);
         if (montage.effects) setEffects(montage.effects);
-        if (montage.audioTrack?.url) setReelAudioUrl(resolveAssetUrl(montage.audioTrack.url));
+        const trackUrl = montage.audioTrack?.url || targetSong?.previewUrl || targetSong?.audioUrl;
+        if (trackUrl) setReelAudioUrl(resolveAssetUrl(trackUrl));
         if (montage.summary) setAiSummary(montage.summary);
       } else {
-        assembleLocalPhotoReel();
+        assembleLocalPhotoReel(targetSong);
       }
     } catch (err: any) {
       console.warn('Backend photo reel fallback (compiling locally):', err.message);
@@ -983,6 +976,8 @@ export function App() {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenExport={() => setIsExportOpen(true)}
         onOpenVision={handleOpenVision}
+        onOpenMusic={() => setIsTrendingPickerOpen(true)}
+        onOpenSubtitleGallery={() => setIsSubtitleGalleryOpen(true)}
         onUploadClick={() => fileInputRef.current?.click()}
         isProcessing={isProcessing}
         processingStatus={processingStatus}
@@ -1191,6 +1186,16 @@ export function App() {
         onClose={() => setIsSettingsOpen(false)}
         config={config}
         onConfigUpdated={(newConfig) => setConfig(newConfig)}
+      />
+
+      {/* Subtitle Styles Studio Modal (18 Presets) */}
+      <SubtitleStyleGalleryModal
+        isOpen={isSubtitleGalleryOpen}
+        onClose={() => setIsSubtitleGalleryOpen(false)}
+        currentStyle={subtitleStyle}
+        onSelectStyle={(newStyle) => {
+          setSubtitleStyle(newStyle);
+        }}
       />
 
       {/* Export / Deliver Master Modal */}

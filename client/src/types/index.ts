@@ -42,8 +42,29 @@ export interface SubtitleSegment {
   text: string;
 }
 
+export type SubtitlePreset =
+  | 'hormozi'
+  | 'mrbeast'
+  | 'neon_cyberpunk'
+  | 'retro_vhs'
+  | 'karaoke_glow'
+  | 'comic_pop'
+  | 'typewriter'
+  | 'golden_luxury'
+  | 'cinematic_clean'
+  | 'glitch_hacker'
+  | 'boxed_pill'
+  | 'fire_gradient'
+  | 'documentary_italic'
+  | 'isometric_3d'
+  | 'y2k_aesthetic'
+  | 'news_lower_third'
+  | 'anime_speed'
+  | 'drop_shadow_studio';
+
 export interface SubtitleStyle {
-  preset: 'hormozi' | 'mrbeast' | 'cinematic' | 'cyberpunk' | 'boxed';
+  preset: SubtitlePreset | string;
+  name?: string;
   fontFamily: string;
   fontSize: number;
   textColor: string;
@@ -51,8 +72,10 @@ export interface SubtitleStyle {
   strokeColor: string;
   strokeWidth: number;
   textCase: 'uppercase' | 'normal';
-  animation: 'bounce' | 'pop' | 'glow' | 'none';
+  animation: 'bounce' | 'pop' | 'glow' | 'fade' | 'slide' | 'none';
   positionY: number; // percentage from bottom e.g. 18%
+  backgroundColor?: string;
+  shadowColor?: string;
 }
 
 export interface ColorWheelVector {
@@ -91,7 +114,19 @@ export type TransitionType =
   | 'zoom_blur'
   | 'glitch'
   | 'film_burn'
-  | 'spin';
+  | 'spin'
+  | 'cube_flip'
+  | 'push_slide'
+  | 'split_slice'
+  | 'iris_wipe'
+  | 'pixelate'
+  | 'rgb_split'
+  | 'shake_impact'
+  | 'cross_zoom'
+  | 'ink_bleed'
+  | 'lens_flare'
+  | 'page_curl'
+  | 'dissolve';
 
 export interface VideoTransition {
   id: string;
@@ -108,7 +143,10 @@ export type EffectType =
   | 'vignette'
   | 'rgb_split'
   | 'vhs_scanlines'
-  | 'cinematic_letterbox';
+  | 'cinematic_letterbox'
+  | 'retro_80s'
+  | 'anamorphic_streak'
+  | 'blur_bokeh';
 
 export interface VideoEffect {
   id: string;
@@ -175,8 +213,12 @@ export interface TrendingSong {
   bpm: number;
   dropTime: number;
   thumbnailUrl: string;
-  audioFileName: string;
+  audioFileName?: string;
   audioUrl: string;
+  previewUrl?: string;
+  album?: string;
+  duration?: number;
+  releaseDate?: string;
   description: string;
 }
 

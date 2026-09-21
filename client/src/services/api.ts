@@ -100,14 +100,16 @@ export async function searchTrendingSongs(query = 'trending attitude hindi song'
 export async function applyAttitudeReel({
   songId,
   duration,
+  songData,
 }: {
-  songId: string;
+  songId?: string;
   duration: number;
+  songData?: TrendingSong;
 }): Promise<AttitudeReelPlan> {
   const res = await fetch(`${API_BASE}/trending-audio/apply-attitude-reel`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ songId, duration }),
+    body: JSON.stringify({ songId, duration, songData }),
   });
   const data = await res.json();
   if (!data.success) {
@@ -136,15 +138,17 @@ export async function generatePhotosToReel({
   photos = [],
   prompt = 'attitude reel',
   songId = 'trend-hindi-1',
+  songData,
 }: {
   photos?: any[];
   prompt?: string;
   songId?: string;
+  songData?: TrendingSong;
 }): Promise<any> {
   const res = await fetch(`${API_BASE}/photos-to-reel`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ photos, prompt, songId }),
+    body: JSON.stringify({ photos, prompt, songId, songData }),
   });
 
   const data = await res.json();

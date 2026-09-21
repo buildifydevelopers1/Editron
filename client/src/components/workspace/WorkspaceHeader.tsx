@@ -12,7 +12,8 @@ import {
   UploadCloud,
   CheckCircle2,
   AlertCircle,
-  Zap
+  Zap,
+  Music
 } from 'lucide-react';
 import { WorkspacePage, AppConfig } from '../../types';
 
@@ -23,6 +24,8 @@ interface WorkspaceHeaderProps {
   onOpenSettings: () => void;
   onOpenExport: () => void;
   onOpenVision: () => void;
+  onOpenMusic: () => void;
+  onOpenSubtitleGallery: () => void;
   onUploadClick: () => void;
   isProcessing: boolean;
   processingStatus: string;
@@ -35,6 +38,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   onOpenSettings,
   onOpenExport,
   onOpenVision,
+  onOpenMusic,
+  onOpenSubtitleGallery,
   onUploadClick,
   isProcessing,
   processingStatus,
@@ -121,6 +126,26 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         >
           <Sparkles className="w-3.5 h-3.5" />
           <span>Vision AI</span>
+        </button>
+
+        {/* Live Internet Music Engine */}
+        <button
+          onClick={onOpenMusic}
+          title="Search Live Internet Music (Apple Music / Global CDN)"
+          className="flex items-center space-x-1.5 bg-resolve-850 hover:bg-cyan-950/60 border border-cyan-500/40 text-cyan-400 hover:text-cyan-300 px-2.5 py-1 rounded text-xs transition font-medium"
+        >
+          <Music className="w-3.5 h-3.5" />
+          <span>Music</span>
+        </button>
+
+        {/* 18 Subtitle Styles Studio */}
+        <button
+          onClick={onOpenSubtitleGallery}
+          title="Browse 18 Subtitle Presets (Hormozi, MrBeast, Neon, etc.)"
+          className="flex items-center space-x-1.5 bg-resolve-850 hover:bg-amber-950/60 border border-amber-500/40 text-amber-400 hover:text-amber-300 px-2.5 py-1 rounded text-xs transition font-medium"
+        >
+          <Subtitles className="w-3.5 h-3.5" />
+          <span>Subtitles</span>
         </button>
 
         {/* Upload Button */}
