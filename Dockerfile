@@ -1,32 +1,34 @@
 # ==============================================================================
 # Editron — Multi-Stage Production Dockerfile (FFmpeg + Node.js 20 + React Client)
-# Designed for Render.com, Railway, Fly.io, or VPS Docker hosts
+# Uses Debian 12 Bookworm (Active Stable) with native FFmpeg 5.1+
+# Compatible with Render.com, Railway, Fly.io, or VPS Docker hosts
 # ==============================================================================
 
 # ---- Stage 1: Build Frontend ----
-FROM node:20-bullseye-slim AS frontend-builder
+FROM node:20-bookworm-slim AS frontend-builder
 WORKDIR /app/client
 
 # Install frontend dependencies
 COPY client/package*.json ./
-RUN npm ci
+RUN npm install
 
 # Copy source code and build production bundle
 COPY client/ ./
 RUN npm run build
 
 # ---- Stage 2: Production Server with FFmpeg ----
-FROM node:20-bullseye-slim AS production
+FROM node:20-bookworm-slim AS production
 WORKDIR /app
 
-# Install native FFmpeg, FFprobe, and essential media codecs
+# Install native FFmpeg, FFprobe, and essential utilities on Debian 12 Bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     ca-certificates \
     curl \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Verify FFmpeg installation
+# Verify FFmpeg & FFprobe installation
 RUN ffmpeg -version && ffprobe -version
 
 # Set production environment
@@ -39,7 +41,7 @@ COPY server/package*.json ./server/
 
 # Install production dependencies for server
 WORKDIR /app/server
-RUN npm ci --only=production
+RUN npm install --only=production
 
 # Return to /app
 WORKDIR /app
