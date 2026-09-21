@@ -30,6 +30,7 @@ interface WorkspaceHeaderProps {
   onOpenMusic: () => void;
   onOpenSubtitleGallery: () => void;
   onOpenMultiComposer?: () => void;
+  onOpenAutonomousDirector?: () => void;
   onUploadClick: () => void;
   isProcessing: boolean;
   processingStatus: string;
@@ -49,6 +50,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   onOpenMusic,
   onOpenSubtitleGallery,
   onOpenMultiComposer,
+  onOpenAutonomousDirector,
   onUploadClick,
   isProcessing,
   processingStatus,
@@ -200,6 +202,18 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           >
             <Wand2 className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
             <span>AI Composer</span>
+          </button>
+        )}
+
+        {/* Autonomous Director Loop Button */}
+        {onOpenAutonomousDirector && (
+          <button
+            onClick={onOpenAutonomousDirector}
+            title="Autonomous Multi-Pass AI Director (Plan -> Vision Critic -> Polish)"
+            className="flex items-center space-x-1.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-purple-500 text-white px-3 py-1 rounded text-xs font-bold transition shadow-md shadow-purple-500/20"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-cyan-300 animate-pulse" />
+            <span>AI Director Loop</span>
           </button>
         )}
 

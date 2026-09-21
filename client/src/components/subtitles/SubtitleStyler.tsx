@@ -20,6 +20,8 @@ interface SubtitleStylerProps {
   onSubtitlesChange: (words: SubtitleWord[]) => void;
   currentTime: number;
   onSeek: (time: number) => void;
+  onGenerateSubtitles?: (prompt?: string) => void;
+  isGeneratingSubtitles?: boolean;
 }
 
 export const SubtitleStyler: React.FC<SubtitleStylerProps> = ({
@@ -29,6 +31,8 @@ export const SubtitleStyler: React.FC<SubtitleStylerProps> = ({
   onSubtitlesChange,
   currentTime,
   onSeek,
+  onGenerateSubtitles,
+  isGeneratingSubtitles = false,
 }) => {
   const presets = ALL_SUBTITLE_PRESETS;
 
@@ -229,6 +233,16 @@ export const SubtitleStyler: React.FC<SubtitleStylerProps> = ({
             </p>
           </div>
           <div className="flex items-center space-x-2">
+            {onGenerateSubtitles && (
+              <button
+                onClick={() => onGenerateSubtitles()}
+                disabled={isGeneratingSubtitles}
+                className="flex items-center space-x-1.5 px-3 py-1 text-xs font-bold bg-gradient-to-r from-amber-500 to-resolve-orange hover:from-amber-400 hover:to-orange-400 text-black rounded transition shadow-sm disabled:opacity-50"
+              >
+                <Sparkles className={`w-3.5 h-3.5 ${isGeneratingSubtitles ? 'animate-spin' : ''}`} />
+                <span>{isGeneratingSubtitles ? 'Generating...' : '✨ Generate AI Subtitles'}</span>
+              </button>
+            )}
             <span className="text-xs font-mono text-gray-400 bg-resolve-900 px-2 py-1 rounded border border-resolve-800">
               {subtitles.length} words detected
             </span>
@@ -258,12 +272,38 @@ export const SubtitleStyler: React.FC<SubtitleStylerProps> = ({
         {/* Word Grid / Stream */}
         <div className="flex-1 overflow-y-auto mt-3 pr-2 flex flex-wrap gap-2 content-start">
           {subtitles.length === 0 ? (
-            <div className="w-full h-48 flex flex-col items-center justify-center text-gray-500">
-              <Subtitles className="w-8 h-8 mb-2 opacity-40" />
-              <p className="text-sm">No transcript loaded yet.</p>
-              <p className="text-xs text-gray-600 mt-1">
-                Upload a video or click "Generate Subtitles" via the AI prompt bar!
+            <div className="w-full h-56 flex flex-col items-center justify-center text-gray-400 p-6 text-center">
+              <Subtitles className="w-10 h-10 mb-3 text-resolve-orange opacity-80" />
+              <h4 className="text-sm font-bold text-gray-200 mb-1">No Subtitles on Timeline</h4>
+              <p className="text-xs text-gray-400 max-w-sm mb-4">
+                Transcribe spoken dialogue with Whisper or synthesize punchy attitude/lyrical captions with AI.
               </p>
+              {onGenerateSubtitles && (
+                <div className="flex flex-wrap justify-center gap-2">
+                  <button
+                    onClick={() => onGenerateSubtitles('generate subtitles for speech or dialogue')}
+                    disabled={isGeneratingSubtitles}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold bg-resolve-orange hover:bg-resolve-orange-hover text-black rounded-lg transition shadow-md disabled:opacity-50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Auto-Transcribe Audio (Whisper)</span>
+                  </button>
+                  <button
+                    onClick={() => onGenerateSubtitles('generate bold attitude reel subtitles')}
+                    disabled={isGeneratingSubtitles}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold bg-resolve-800 hover:bg-resolve-750 text-gray-200 border border-resolve-700 rounded-lg transition disabled:opacity-50"
+                  >
+                    <span>🔥 Attitude Captions</span>
+                  </button>
+                  <button
+                    onClick={() => onGenerateSubtitles('generate motivational viral captions')}
+                    disabled={isGeneratingSubtitles}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold bg-resolve-800 hover:bg-resolve-750 text-gray-200 border border-resolve-700 rounded-lg transition disabled:opacity-50"
+                  >
+                    <span>🌟 Motivational Quotes</span>
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             subtitles.map((sub) => {

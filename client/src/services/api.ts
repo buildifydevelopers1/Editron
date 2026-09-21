@@ -355,3 +355,81 @@ export async function generateMultiAssetReel({
   }
   return data.reelPlan;
 }
+
+export interface SubtitleGenerationResult {
+  success: boolean;
+  source: 'whisper' | 'ai-director';
+  subtitles: SubtitleWord[];
+  subtitleStyle?: SubtitleStyle;
+  summary?: string;
+}
+
+export async function requestGenerateSubtitles({
+  videoPath,
+  audioPath,
+  prompt = 'generate subtitles',
+  duration = 30,
+  stylePreset = 'hormozi',
+}: {
+  videoPath?: string;
+  audioPath?: string;
+  prompt?: string;
+  duration?: number;
+  stylePreset?: string;
+}): Promise<SubtitleGenerationResult> {
+  const res = await fetch(`${API_BASE}/generate-subtitles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ videoPath, audioPath, prompt, duration, stylePreset }),
+  });
+
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error || 'Failed to generate subtitles');
+  }
+  return data;
+}
+
+export interface AutonomousDirectorResult {
+  success: boolean;
+  draftPlan: any;
+  frames: { timestamp: number; path: string; url: string }[];
+  visionCritique: {
+    shotType?: string;
+    lightingQuality?: string;
+    emotionalTone?: string;
+    faceFraming?: string;
+    sceneDescription?: string;
+    colorRecommendations?: any;
+    memeAndBrollSuggestions?: any[];
+  };
+  finalPlan: any;
+  improvements: string[];
+}
+
+export async function requestAutonomousDirectorLoop({
+  prompt = 'Autonomous broadcast edit with viral hook',
+  videoPath,
+  duration = 30,
+  photos = [],
+  audioTrack,
+}: {
+  prompt?: string;
+  videoPath?: string;
+  duration?: number;
+  photos?: any[];
+  audioTrack?: any;
+}): Promise<AutonomousDirectorResult> {
+  const res = await fetch(`${API_BASE}/autonomous-director-loop`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, videoPath, duration, photos, audioTrack }),
+  });
+
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error || 'Autonomous Director loop failed');
+  }
+  return data;
+}
+

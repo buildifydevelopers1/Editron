@@ -647,6 +647,148 @@ router.post('/ai-edit', async (req, res) => {
 });
 
 /**
+ * Prompt-Driven & Audio-Synchronized Subtitles Generator
+ * Handles dual-mode subtitles:
+ * 1. If video/audio contains real speech -> transcribes via Whisper
+ * 2. If audio is purely music/instrumental, or photos, or user asked for attitude/custom captions -> synthesizes via gpt-oss-120b
+ */
+router.post('/generate-subtitles', async (req, res) => {
+  try {
+    const { videoPath, audioPath, prompt = 'generate subtitles', duration = 30, stylePreset = 'hormozi' } = req.body;
+    let resolvedAudioPath = resolveMediaFilePath(audioPath);
+    let resolvedVideoPath = resolveMediaFilePath(videoPath);
+
+    // If no direct audio path but video exists, attempt audio extraction
+    if (!resolvedAudioPath && resolvedVideoPath) {
+      const extractedAudio = path.join(uploadDir, `extracted_${Date.now()}_audio.wav`);
+      try {
+        await FFmpegService.extractAudio(resolvedVideoPath, extractedAudio);
+        if (fs.existsSync(extractedAudio)) {
+          resolvedAudioPath = extractedAudio;
+        }
+      } catch (extErr) {
+        console.warn('Audio extraction warning for subtitle generation:', extErr.message);
+      }
+    }
+
+    let speechTranscript = null;
+    if (resolvedAudioPath && fs.existsSync(resolvedAudioPath)) {
+      try {
+        speechTranscript = await AIService.transcribeAudio({
+          audioFilePath: resolvedAudioPath,
+        });
+      } catch (tErr) {
+        console.warn('Whisper transcription attempt notice:', tErr.message);
+      }
+    }
+
+    const p = (prompt || '').toLowerCase();
+    const hasSpeech = speechTranscript && speechTranscript.words && speechTranscript.words.length > 0 && speechTranscript.text && speechTranscript.text.trim().length > 3;
+    const explicitlyRequestsCreativeCaptions = p.includes('attitude') || p.includes('quote') || p.includes('lyrics') || p.includes('motivat') || p.includes('cyber') || p.includes('viral');
+
+    // If real speech is present and prompt didn't ask to replace with custom creative captions:
+    if (hasSpeech && !explicitlyRequestsCreativeCaptions) {
+      const plan = AIService.generateHeuristicEdits(prompt, speechTranscript, duration);
+      return res.json({
+        success: true,
+        source: 'whisper',
+        subtitles: speechTranscript.words,
+        subtitleStyle: plan.subtitleStyle,
+        summary: `Transcribed ${speechTranscript.words.length} spoken words using Whisper. Applied ${plan.subtitleStyle.preset} styling.`
+      });
+    }
+
+    // Otherwise, generate prompt-driven timed captions with gpt-oss-120b
+    const aiSubtitles = await AIService.generateSubtitlesFromPrompt({
+      prompt,
+      duration: duration || (speechTranscript?.duration || 30),
+      stylePreset
+    });
+
+    res.json({
+      success: true,
+      source: 'ai-director',
+      subtitles: aiSubtitles.words || [],
+      subtitleStyle: aiSubtitles.subtitleStyle,
+      summary: aiSubtitles.summary || `Synthesized dynamic word subtitles synchronized to ${duration}s timeline.`
+    });
+  } catch (err) {
+    console.error('Subtitle generation failed:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Autonomous 3-Pass AI Director Loop:
+ * Pass 1: Draft Edit Plan (gpt-oss-120b)
+ * Pass 2: Multimodal Vision Critic Analysis on Keyframes (llama-3.2-11b-vision-preview)
+ * Pass 3: Self-Improvement & Master Polishing (gpt-oss-120b)
+ */
+router.post('/autonomous-director-loop', async (req, res) => {
+  try {
+    const { prompt = 'Autonomous broadcast edit with viral hook', videoPath, duration = 30, photos = [], audioTrack } = req.body;
+    const resolvedVideoPath = resolveMediaFilePath(videoPath);
+
+    // --- PASS 1: Generate Initial Draft Edit Plan ---
+    const draftPlan = await AIService.generateTimelineEdits({
+      prompt,
+      duration: duration || 30
+    });
+
+    // --- PASS 2: Multimodal Vision Critic Inspection ---
+    let frames = [];
+    if (resolvedVideoPath) {
+      frames = await FFmpegService.extractKeyframes(resolvedVideoPath, duration || 12, 4, uploadDir);
+    } else if (photos && photos.length > 0) {
+      // Use photo files as frames
+      frames = photos.slice(0, 4).map((p, idx) => ({
+        timestamp: idx * (duration / Math.max(photos.length, 1)),
+        path: resolveMediaFilePath(p.url || p.path) || p.path || p.url,
+        url: p.url
+      })).filter(f => f.path && fs.existsSync(f.path));
+    }
+
+    // Call Multimodal Vision Critic
+    const visionCritique = await AIService.analyzeVideoVision({
+      frames,
+      prompt: `Critique this video edit for: shot composition, lighting consistency, face framing for 9:16 safe zones, color grading balance, and subtitle contrast. User prompt: "${prompt}"`
+    });
+
+    // --- PASS 3: AI Self-Improvement & Master Polish ---
+    const finalPlan = await AIService.refineEditsWithVisionCritic({
+      prompt,
+      draftPlan,
+      visionAnalysis: visionCritique,
+      duration: duration || 30
+    });
+
+    // Ensure subtitles are populated in final plan
+    if (!finalPlan.subtitles || finalPlan.subtitles.length === 0) {
+      const generatedSubs = await AIService.generateSubtitlesFromPrompt({
+        prompt,
+        duration: duration || 30,
+        stylePreset: finalPlan.subtitleStyle?.preset || 'hormozi'
+      });
+      finalPlan.subtitles = generatedSubs.words;
+      if (!finalPlan.subtitleStyle) finalPlan.subtitleStyle = generatedSubs.subtitleStyle;
+    }
+
+    res.json({
+      success: true,
+      draftPlan,
+      frames,
+      visionCritique,
+      finalPlan,
+      improvements: finalPlan.improvements || []
+    });
+  } catch (err) {
+    console.error('Autonomous director loop error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+/**
  * Real Audio Silence Detection & Speech Auto-Cut Engine
  */
 router.post('/ai-autocut', async (req, res) => {

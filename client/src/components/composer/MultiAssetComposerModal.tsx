@@ -14,10 +14,12 @@ import {
   Radio,
   Sliders,
   Flame,
-  Loader2
+  Loader2,
+  Wand2,
+  Eye
 } from 'lucide-react';
 import { AspectRatio } from '../../types';
-import { generateMultiAssetReel } from '../../services/api';
+import { generateMultiAssetReel, requestAutonomousDirectorLoop } from '../../services/api';
 
 interface MultiAssetComposerModalProps {
   isOpen: boolean;
@@ -34,6 +36,7 @@ export const MultiAssetComposerModal: React.FC<MultiAssetComposerModalProps> = (
   const [targetDuration, setTargetDuration] = useState<number>(20);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('9:16');
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [enableVisionLoop, setEnableVisionLoop] = useState<boolean>(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processStage, setProcessStage] = useState<string>('');
 
@@ -85,7 +88,7 @@ export const MultiAssetComposerModal: React.FC<MultiAssetComposerModalProps> = (
         setProcessStage('Aligning assets to beat drops & applying 3D transitions...');
       }, 4500);
 
-      const plan = await generateMultiAssetReel({
+      let plan = await generateMultiAssetReel({
         files: uploadedFiles,
         prompt: prompt.trim(),
         targetDuration,
@@ -95,6 +98,28 @@ export const MultiAssetComposerModal: React.FC<MultiAssetComposerModalProps> = (
       clearTimeout(stageTimer1);
       clearTimeout(stageTimer2);
       clearTimeout(stageTimer3);
+
+      if (enableVisionLoop && plan) {
+        setProcessStage('Multimodal Vision Critic inspecting composition & auto-calibrating master...');
+        try {
+          const visionResult = await requestAutonomousDirectorLoop({
+            prompt: prompt.trim(),
+            duration: targetDuration,
+            photos: plan.uploadedPhotos || [],
+          });
+          if (visionResult && visionResult.finalPlan) {
+            plan = {
+              ...plan,
+              colorGrading: visionResult.finalPlan.colorGrading || plan.colorGrading,
+              subtitleStyle: visionResult.finalPlan.subtitleStyle || plan.subtitleStyle,
+              transitions: visionResult.finalPlan.transitions?.length > 0 ? visionResult.finalPlan.transitions : plan.transitions,
+              summary: `${plan.summary} [Vision Critic Mastered: ${visionResult.improvements?.slice(0, 2).join(' • ') || 'Calibrated'}]`,
+            };
+          }
+        } catch (vErr) {
+          console.warn('Vision loop refinement notice:', vErr);
+        }
+      }
 
       if (plan) {
         onApplyReel(plan);
@@ -341,6 +366,37 @@ export const MultiAssetComposerModal: React.FC<MultiAssetComposerModalProps> = (
               <p className="text-[10px] text-gray-500">
                 Vertical 9:16 is optimized for Instagram Reels, YouTube Shorts, & TikTok.
               </p>
+            </div>
+
+            {/* Autonomous Vision Critic & Self-Refinement Toggle */}
+            <div className="bg-[#0e0e17] border border-indigo-500/30 rounded-xl p-3 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-7 h-7 rounded-lg bg-indigo-500/20 flex items-center justify-center text-indigo-400">
+                  <Wand2 className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="text-xs font-bold text-gray-200">Multimodal Vision Critic & Self-Refine</span>
+                    <span className="text-[9px] font-mono bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-500/30">
+                      Llama 3.2 Vision
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-400">
+                    Inspects draft composition keyframes for lighting, framing & text contrast before mastering.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEnableVisionLoop(!enableVisionLoop)}
+                className={`px-3 py-1 rounded-full text-[11px] font-bold transition border ${
+                  enableVisionLoop
+                    ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-500/30'
+                    : 'bg-gray-800 text-gray-400 border-gray-700'
+                }`}
+              >
+                {enableVisionLoop ? 'ENABLED' : 'OFF'}
+              </button>
             </div>
           </div>
         </div>

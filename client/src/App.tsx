@@ -15,6 +15,7 @@ import { AssetLibraryPanel } from './components/media/AssetLibraryPanel';
 import { TrendingSongPickerModal } from './components/audio/TrendingSongPickerModal';
 import { SubtitleStyleGalleryModal } from './components/subtitles/SubtitleStyleGalleryModal';
 import { MultiAssetComposerModal } from './components/composer/MultiAssetComposerModal';
+import { AutonomousDirectorModal } from './components/director/AutonomousDirectorModal';
 import { EffectsPanel } from './components/effects/EffectsPanel';
 import { useTimelineHistory, TimelineSnapshot } from './hooks/useTimelineHistory';
 import {
@@ -39,6 +40,7 @@ import {
   fetchConfig,
   generatePhotosToReel,
   requestAIEdits,
+  requestGenerateSubtitles,
   requestSilenceDetection,
   requestTranscription,
   requestVisionAnalysis,
@@ -64,6 +66,8 @@ export function App() {
   const [isApplyingReel, setIsApplyingReel] = useState(false);
   const [isSubtitleGalleryOpen, setIsSubtitleGalleryOpen] = useState(false);
   const [isMultiComposerOpen, setIsMultiComposerOpen] = useState(false);
+  const [isAutonomousDirectorOpen, setIsAutonomousDirectorOpen] = useState(false);
+  const [isGeneratingSubtitles, setIsGeneratingSubtitles] = useState(false);
 
   // Vision Analysis State
   const [visionFrames, setVisionFrames] = useState<KeyframeItem[]>([]);
@@ -496,11 +500,125 @@ export function App() {
     }
   };
 
+  // Dedicated Subtitle Generation (Whisper Audio Transcription or gpt-oss-120b Lyrics/Captions)
+  const handleGenerateSubtitles = async (customPrompt?: string) => {
+    saveCurrentSnapshot();
+    setIsGeneratingSubtitles(true);
+    setProcessingStatus(`Synthesizing subtitles with ${config?.whisperModel || 'Whisper'} & AI Director...`);
+
+    try {
+      const activePrompt = customPrompt || 'generate subtitles and sync to audio';
+      const result = await requestGenerateSubtitles({
+        videoPath,
+        prompt: activePrompt,
+        duration,
+        stylePreset: subtitleStyle.preset,
+      });
+
+      if (result && result.subtitles && result.subtitles.length > 0) {
+        setSubtitles(result.subtitles);
+        if (result.subtitleStyle) {
+          setSubtitleStyle((prev) => ({ ...prev, ...result.subtitleStyle }));
+        }
+        setAiSummary(
+          result.summary ||
+          `Generated ${result.subtitles.length} synchronized words using ${result.source === 'whisper' ? 'Whisper Audio Transcription' : 'AI Director Typography Engine'}.`
+        );
+      }
+    } catch (err: any) {
+      console.error('Subtitle generation failed:', err);
+      alert(`Subtitle generation notice: ${err.message || 'Error generating subtitles'}`);
+    } finally {
+      setIsGeneratingSubtitles(false);
+      setProcessingStatus('');
+    }
+  };
+
+  // Autonomous Director Master Timeline Application
+  const handleApplyAutonomousMaster = (masterPlan: any) => {
+    saveCurrentSnapshot();
+    if (!masterPlan) return;
+
+    if (masterPlan.summary) {
+      setAiSummary(masterPlan.summary);
+    }
+    if (masterPlan.aspectRatio) {
+      setAspectRatio(masterPlan.aspectRatio);
+    }
+    if (masterPlan.colorGrading) {
+      setColorGrading((prev) => ({ ...prev, ...masterPlan.colorGrading }));
+    }
+    if (masterPlan.subtitleStyle) {
+      setSubtitleStyle((prev) => ({ ...prev, ...masterPlan.subtitleStyle }));
+    }
+    if (masterPlan.subtitles && masterPlan.subtitles.length > 0) {
+      setSubtitles(masterPlan.subtitles);
+    }
+    if (masterPlan.transitions && masterPlan.transitions.length > 0) {
+      setTransitions(masterPlan.transitions);
+    }
+    if (masterPlan.effects && masterPlan.effects.length > 0) {
+      setEffects(masterPlan.effects);
+    }
+    const isPhotoTimeline = clips.some((c) => c.type === 'image');
+    if (!isPhotoTimeline && masterPlan.cuts && masterPlan.cuts.length > 0) {
+      const newClips: VideoClip[] = masterPlan.cuts.map((c: any, i: number) => ({
+        id: `ai-clip-${i}-${Date.now()}`,
+        name: c.label || `Cut ${i + 1}`,
+        trackId: 'v1',
+        start: c.start,
+        end: c.end,
+        sourceStart: c.start,
+        sourceEnd: c.end,
+        speed: c.speed || 1.0,
+      }));
+      setClips(newClips);
+      setSelectedClipId(newClips[0]?.id || null);
+    }
+    if (masterPlan.zooms && masterPlan.zooms.length > 0) {
+      setTransform((prev) => ({
+        ...prev,
+        scale: masterPlan.zooms[0].scale || 1.15,
+      }));
+    }
+  };
+
   // AI Prompt Bar Submission
   const handleAIPrompt = async (prompt: string) => {
     saveCurrentSnapshot();
     setIsProcessing(true);
     const p = prompt.toLowerCase();
+
+    // Check if user requested subtitle generation or speech-to-text
+    if (
+      p.includes('generate subtitle') ||
+      p.includes('create subtitle') ||
+      p.includes('add subtitle') ||
+      p.includes('generate captions') ||
+      p.includes('add captions') ||
+      p.includes('transcribe') ||
+      p.includes('speech to text') ||
+      p.includes('subtitles')
+    ) {
+      await handleGenerateSubtitles(prompt);
+      setIsProcessing(false);
+      setProcessingStatus('');
+      return;
+    }
+
+    // Check if user requested autonomous director / vision critic loop
+    if (
+      p.includes('autonomous') ||
+      p.includes('director loop') ||
+      p.includes('vision loop') ||
+      p.includes('critique') ||
+      p.includes('self improve')
+    ) {
+      setIsAutonomousDirectorOpen(true);
+      setIsProcessing(false);
+      setProcessingStatus('');
+      return;
+    }
 
     // Check if user requested auto-cutting silences / jump cuts
     if (
@@ -1089,6 +1207,7 @@ export function App() {
         onOpenMusic={() => setIsTrendingPickerOpen(true)}
         onOpenSubtitleGallery={() => setIsSubtitleGalleryOpen(true)}
         onOpenMultiComposer={() => setIsMultiComposerOpen(true)}
+        onOpenAutonomousDirector={() => setIsAutonomousDirectorOpen(true)}
         onUploadClick={() => fileInputRef.current?.click()}
         isProcessing={isProcessing}
         processingStatus={processingStatus}
@@ -1107,6 +1226,7 @@ export function App() {
         onUploadPhotos={() => photoInputRef.current?.click()}
         photosCount={userPhotos.length}
         onOpenMultiComposer={() => setIsMultiComposerOpen(true)}
+        onOpenAutonomousDirector={() => setIsAutonomousDirectorOpen(true)}
       />
 
       {/* Main Workspace Dynamic Page Body */}
@@ -1257,6 +1377,8 @@ export function App() {
                 onSubtitlesChange={setSubtitles}
                 currentTime={currentTime}
                 onSeek={(t) => setCurrentTime(t)}
+                onGenerateSubtitles={handleGenerateSubtitles}
+                isGeneratingSubtitles={isGeneratingSubtitles}
               />
             </div>
           </div>
@@ -1319,6 +1441,16 @@ export function App() {
         isOpen={isMultiComposerOpen}
         onClose={() => setIsMultiComposerOpen(false)}
         onApplyReel={handleApplyMultiAssetReel}
+      />
+
+      {/* Autonomous AI Director Loop Modal */}
+      <AutonomousDirectorModal
+        isOpen={isAutonomousDirectorOpen}
+        onClose={() => setIsAutonomousDirectorOpen(false)}
+        videoPath={videoPath}
+        duration={duration}
+        userPhotos={userPhotos}
+        onApplyMaster={handleApplyAutonomousMaster}
       />
 
       {/* Export / Deliver Master Modal */}
