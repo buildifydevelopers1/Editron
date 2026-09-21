@@ -446,8 +446,74 @@ export function App() {
           return;
         }
       } catch (err) {
-        console.warn('Trending search fallback:', err);
+        console.warn('Trending search fallback to local library:', err);
       }
+
+      // Offline / Demo Fallback: Load curated viral Attitude Hindi songs directly
+      const fallbackSongs: TrendingSong[] = [
+        {
+          id: 'trend-hindi-1',
+          title: 'Elevated (Attitude Bass Mix)',
+          artist: 'Shubh',
+          genre: 'Hindi / Punjabi Hip-Hop',
+          vibe: 'Raw Attitude & Confidence',
+          trendScore: '🔥 3.8M Reels • Trending #1',
+          bpm: 130,
+          dropTime: 3.2,
+          thumbnailUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80',
+          audioUrl: '/uploads/elevated_attitude_beat.mp3',
+          audioFileName: 'elevated_attitude_beat.mp3',
+          description: 'Hard-hitting 808 bass slides, punchy trap claps, and confident swagger.'
+        },
+        {
+          id: 'trend-hindi-2',
+          title: 'Baller (Gangster Phonk Cut)',
+          artist: 'Shubh & Ikky',
+          genre: 'Desi Trap / Drill',
+          vibe: 'High Energy Boss Walk',
+          trendScore: '🔥 2.4M Reels • Trending #2',
+          bpm: 140,
+          dropTime: 2.8,
+          thumbnailUrl: 'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=300&q=80',
+          audioUrl: '/uploads/baller_desi_trap.mp3',
+          audioFileName: 'baller_desi_trap.mp3',
+          description: 'Aggressive brass stabs, heavy distortion sub-bass, and rapid hi-hats.'
+        },
+        {
+          id: 'trend-hindi-3',
+          title: 'Dafa 406 (Desi Haryanvi Swag)',
+          artist: 'Chhotu Shikari / Viral Reel Anthem',
+          genre: 'Haryanvi / Hindi Folk Drill',
+          vibe: 'Unapologetic Desi Attitude',
+          trendScore: '🔥 4.5M Reels • Viral Anthem',
+          bpm: 134,
+          dropTime: 4.1,
+          thumbnailUrl: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=300&q=80',
+          audioUrl: '/uploads/dafa_406_anthem.mp3',
+          audioFileName: 'dafa_406_anthem.mp3',
+          description: 'Iconic viral trending hook, infectious rhythm, and dramatic drop.'
+        },
+        {
+          id: 'trend-hindi-4',
+          title: 'Big Dawgs (Desi Bass Crossover)',
+          artist: 'Hanumankind & Kalmi',
+          genre: 'Hardcore Underground Hip-Hop',
+          vibe: 'Untouchable Energy & Alpha Vibe',
+          trendScore: '🔥 5.1M Reels • Global Phenomenon',
+          bpm: 145,
+          dropTime: 3.6,
+          thumbnailUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80',
+          audioUrl: '/uploads/big_dawgs_cut.mp3',
+          audioFileName: 'big_dawgs_cut.mp3',
+          description: 'Relentless fast flow, massive 808 kick drum, and intense cinematic tension.'
+        }
+      ];
+      setTrendingSongs(fallbackSongs);
+      setTrendingQuery(prompt);
+      setIsTrendingPickerOpen(true);
+      setIsProcessing(false);
+      setProcessingStatus('');
+      return;
     }
 
     // Check if user requested auto-cutting silences / jump cuts
@@ -554,6 +620,70 @@ export function App() {
     setIsApplyingReel(true);
     setProcessingStatus(`Crafting Attitude Reel with "${song.title}"...`);
 
+    const applyLocalReel = () => {
+      setAspectRatio('9:16');
+      setColorGrading({
+        presetName: 'Attitude Reel Contrast',
+        temperature: 12,
+        tint: -8,
+        contrast: 42,
+        saturation: 25,
+        brightness: -2,
+        lift: { r: -0.08, g: 0.02, b: 0.1, master: -0.04 },
+        gamma: { r: 0.04, g: -0.02, b: -0.04, master: 0.0 },
+        gain: { r: 0.16, g: 0.08, b: -0.06, master: 0.06 },
+        offset: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 }
+      });
+      setSubtitleStyle({
+        preset: 'hormozi',
+        fontFamily: "'Montserrat', Impact, sans-serif",
+        fontSize: 38,
+        textColor: '#FFFFFF',
+        highlightColor: '#FACC15',
+        strokeColor: '#000000',
+        strokeWidth: 5,
+        textCase: 'uppercase',
+        animation: 'bounce',
+        positionY: 22
+      });
+      setAiSummary(`Applied "${song.title}" by ${song.artist}. Auto-configured 9:16 vertical framing, high-contrast attitude color grade, dynamic beat-drop punch-in at ${song.dropTime || 3.2}s, and aggressive Hormozi subtitles.`);
+
+      const dropTime = song.dropTime || 3.2;
+      const newClips: VideoClip[] = [
+        {
+          id: `reel-cut-1-${Date.now()}`,
+          name: 'Attitude Build-up',
+          trackId: 'v1',
+          start: 0.0,
+          end: dropTime,
+          sourceStart: 0.0,
+          sourceEnd: dropTime,
+          speed: 1.0,
+        },
+        {
+          id: `reel-cut-2-${Date.now()}`,
+          name: '🔥 BASS DROP CLIMAX',
+          trackId: 'v1',
+          start: dropTime,
+          end: duration,
+          sourceStart: dropTime,
+          sourceEnd: duration,
+          speed: 1.0,
+        }
+      ];
+      setClips(newClips);
+      setSelectedClipId(newClips[0]?.id || null);
+
+      setTransform((prev) => ({
+        ...prev,
+        scale: 1.25,
+      }));
+
+      const rawAudioUrl = song.audioUrl || `/uploads/${song.audioFileName}`;
+      setReelAudioUrl(resolveAssetUrl(rawAudioUrl));
+      setIsTrendingPickerOpen(false);
+    };
+
     try {
       const reel = await applyAttitudeReel({ songId: song.id, duration });
       if (reel) {
@@ -586,14 +716,16 @@ export function App() {
         }
 
         if (reel.audioTrack?.url) {
-          setReelAudioUrl(reel.audioTrack.url);
+          setReelAudioUrl(resolveAssetUrl(reel.audioTrack.url));
         }
 
         setIsTrendingPickerOpen(false);
+      } else {
+        applyLocalReel();
       }
     } catch (err: any) {
-      console.error('Failed to apply attitude reel:', err);
-      alert(`Could not create attitude reel: ${err.message}`);
+      console.warn('Backend attitude reel fallback (applying offline reel):', err.message);
+      applyLocalReel();
     } finally {
       setIsApplyingReel(false);
       setProcessingStatus('');

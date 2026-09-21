@@ -12,6 +12,7 @@ import {
   Sliders
 } from 'lucide-react';
 import { TrendingSong } from '../../types';
+import { resolveAssetUrl } from '../../services/api';
 
 interface TrendingSongPickerModalProps {
   isOpen: boolean;
@@ -45,9 +46,10 @@ export const TrendingSongPickerModal: React.FC<TrendingSongPickerModalProps> = (
       if (audioRef.current) {
         audioRef.current.pause();
       }
-      const audio = new Audio(song.audioUrl);
+      const soundUrl = resolveAssetUrl(song.audioUrl || `/uploads/${song.audioFileName}`);
+      const audio = new Audio(soundUrl);
       audioRef.current = audio;
-      audio.play().catch(() => {});
+      audio.play().catch((err) => console.warn('Preview play warning:', err));
       audio.onended = () => setPlayingSongId(null);
       setPlayingSongId(song.id);
     }

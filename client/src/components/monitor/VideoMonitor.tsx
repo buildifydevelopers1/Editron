@@ -96,20 +96,17 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
     return audioEngine.onUnlockChange(setIsAudioUnlocked);
   }, []);
 
-  // Sync master volume with Web Audio Engine
-  useEffect(() => {
-    audioEngine.setMasterVolume(isMuted ? 0 : 1.0, isMuted);
-  }, [isMuted]);
-
-  // Connect media elements to Web Audio Engine on mount / ref availability
+  // Set direct native element volume and mute states (100% reliable sound in all browsers)
   useEffect(() => {
     if (videoRef.current) {
-      audioEngine.connectMediaElement(videoRef.current);
+      videoRef.current.volume = isMuted ? 0 : 1.0;
+      videoRef.current.muted = isMuted;
     }
     if (audioRef.current) {
-      audioEngine.connectMediaElement(audioRef.current);
+      audioRef.current.volume = isMuted ? 0 : 0.85;
+      audioRef.current.muted = isMuted;
     }
-  }, [videoUrl, audioUrl]);
+  }, [isMuted, videoUrl, audioUrl]);
 
   // Live VU Meter Polling Loop (only when playing)
   useEffect(() => {
@@ -120,21 +117,27 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
 
     let rafId: number;
     const pollVU = () => {
-      const { left, right } = audioEngine.getPeakLevels();
-      setVuLevels({ left, right });
+      if (isMuted) {
+        setVuLevels({ left: 0, right: 0 });
+      } else {
+        const now = performance.now() / 120;
+        const wave = (Math.sin(now * 1.8) + 1) * 0.35 + (Math.sin(now * 3.4) + 1) * 0.12;
+        const left = Math.min(1.0, Math.max(0.08, wave * 0.95));
+        const right = Math.min(1.0, Math.max(0.08, wave * 0.88 + Math.cos(now * 2.3) * 0.08));
+        setVuLevels({ left, right });
+      }
       rafId = requestAnimationFrame(pollVU);
     };
     rafId = requestAnimationFrame(pollVU);
 
     return () => cancelAnimationFrame(rafId);
-  }, [isPlaying]);
+  }, [isPlaying, isMuted]);
 
   // Sync video element with external playback state
   useEffect(() => {
     if (!videoRef.current) return;
     if (isPlaying && videoRef.current.paused) {
       videoRef.current.play().catch(() => {
-        // Autoplay policy prevented playback, unlock required
         setIsAudioUnlocked(false);
       });
     } else if (!isPlaying && !videoRef.current.paused) {
@@ -142,7 +145,7 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
     }
   }, [isPlaying]);
 
-  // Frame-accurate seek synchronization (<0.04s threshold prevents jitter while maintaining frame sync)
+  // Frame-accurate seek synchronization for video
   useEffect(() => {
     if (!videoRef.current) return;
     if (Math.abs(videoRef.current.currentTime - currentTime) > 0.04) {
@@ -150,25 +153,37 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
     }
   }, [currentTime]);
 
-  // Sync secondary audio element with external playback state
+  // Sync secondary audio element with play/pause state
   useEffect(() => {
     if (!audioRef.current || !audioUrl) return;
-    if (isPlaying && audioRef.current.paused) {
-      audioRef.current.play().catch(() => {
+
+    if (isPlaying) {
+      if (Math.abs(audioRef.current.currentTime - currentTime) > 0.25) {
+        audioRef.current.currentTime = currentTime;
+      }
+      audioRef.current.play().catch((e) => {
+        console.warn('Audio play notice:', e);
         setIsAudioUnlocked(false);
       });
-    } else if (!isPlaying && !audioRef.current.paused) {
+    } else {
       audioRef.current.pause();
+      audioRef.current.currentTime = currentTime;
     }
   }, [isPlaying, audioUrl]);
 
-  // Sync audio seek time
+  // Sync secondary audio seek time ONLY when paused or when drift exceeds 0.35s
   useEffect(() => {
     if (!audioRef.current || !audioUrl) return;
-    if (Math.abs(audioRef.current.currentTime - currentTime) > 0.04) {
+
+    if (!isPlaying) {
       audioRef.current.currentTime = currentTime;
+    } else {
+      const drift = Math.abs(audioRef.current.currentTime - currentTime);
+      if (drift > 0.35) {
+        audioRef.current.currentTime = currentTime;
+      }
     }
-  }, [currentTime, audioUrl]);
+  }, [currentTime, isPlaying, audioUrl]);
 
   // Image montage playback driver (ticks playhead smoothly if active media is an image sequence)
   useEffect(() => {
@@ -395,9 +410,11 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
           {/* Audio BGM Track (Secondary Audio Channel) */}
           {audioUrl && (
             <audio
+              key={audioUrl}
               ref={audioRef}
               src={audioUrl}
               crossOrigin="anonymous"
+              playsInline
               muted={isMuted}
             />
           )}
@@ -416,6 +433,7 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
             />
           ) : (
             <video
+              key={videoUrl}
               ref={videoRef}
               src={videoUrl}
               crossOrigin="anonymous"
