@@ -164,6 +164,7 @@ export interface AppConfig {
   apiKeyMasked: string;
   baseUrl: string;
   llmModel: string;
+  fallbackModel?: string;
   whisperModel: string;
   visionModel?: string;
 }

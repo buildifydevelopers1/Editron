@@ -50,6 +50,7 @@ export async function updateConfig(data: Partial<{
   apiKey: string;
   baseUrl: string;
   llmModel: string;
+  fallbackModel: string;
   whisperModel: string;
   visionModel: string;
 }>): Promise<{ success: boolean; config: AppConfig }> {
@@ -393,6 +394,9 @@ export async function requestGenerateSubtitles({
 
 export interface AutonomousDirectorResult {
   success: boolean;
+  modelUsed?: string;
+  fallbackTriggered?: boolean;
+  genreDetected?: string;
   draftPlan: any;
   frames: { timestamp: number; path: string; url: string }[];
   visionCritique: {

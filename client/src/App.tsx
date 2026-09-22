@@ -683,9 +683,10 @@ export function App() {
       const plan = result.finalPlan || result.draftPlan;
 
       if (plan) {
+        const modelNote = result.modelUsed ? ` • [Model: ${result.modelUsed}${result.fallbackTriggered ? ' (Rate-Limit Protected)' : ''}]` : '';
         const impCount = result.improvements?.length || 0;
-        const impSummary = impCount > 0 ? ` • [Vision-Mastered: ${result.improvements.slice(0, 2).join(' • ')}]` : '';
-        setAiSummary((plan.summary || 'AI Director successfully edited the video.') + impSummary);
+        const impSummary = impCount > 0 ? ` • [Mastered: ${result.improvements.slice(0, 2).join(' • ')}]` : '';
+        setAiSummary((plan.summary || 'AI Director successfully edited the video.') + modelNote + impSummary);
 
         // Apply Aspect Ratio
         if (plan.aspectRatio) {
@@ -706,6 +707,11 @@ export function App() {
             ...prev,
             ...plan.subtitleStyle,
           }));
+        }
+
+        // Apply Subtitles onto timeline
+        if (plan.subtitles && plan.subtitles.length > 0) {
+          setSubtitles(plan.subtitles);
         }
 
         // Apply Transitions (from all 18 cinematic transitions)

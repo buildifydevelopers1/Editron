@@ -147,13 +147,30 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
     }
   }, [isPlaying, isPhotoMontage]);
 
-  // Frame-accurate seek synchronization for video
+  // Frame-accurate seek synchronization for video (supports multi-clip cuts & trimming)
   useEffect(() => {
     if (!videoRef.current || isPhotoMontage) return;
-    if (Math.abs(videoRef.current.currentTime - currentTime) > 0.04) {
-      videoRef.current.currentTime = currentTime;
+
+    if (activeClip && activeClip.type !== 'image') {
+      const sourceStart = activeClip.sourceStart ?? activeClip.start;
+      const speed = activeClip.speed || 1.0;
+      const targetMediaTime = sourceStart + (currentTime - activeClip.start) * speed;
+
+      if (Math.abs(videoRef.current.currentTime - targetMediaTime) > 0.05) {
+        videoRef.current.currentTime = Math.max(0, targetMediaTime);
+      }
+    } else if (!activeClip && clips.length > 0) {
+      // In a gap between clips: jump to the next clip start
+      const nextClip = clips
+        .filter((c) => (c.trackId === 'v1' || !c.trackId) && c.type !== 'image')
+        .sort((a, b) => a.start - b.start)
+        .find((c) => c.start > currentTime);
+
+      if (nextClip && isPlaying) {
+        onSeek(nextClip.start);
+      }
     }
-  }, [currentTime, isPhotoMontage]);
+  }, [currentTime, isPhotoMontage, activeClip, clips, isPlaying, onSeek]);
 
   // Sync secondary audio element with play/pause state
   useEffect(() => {
@@ -603,8 +620,39 @@ export const VideoMonitor: React.FC<VideoMonitorProps> = ({
               }}
               playsInline
               muted={isMuted}
-              onError={() => setVideoLoadError(true)}
-              onTimeUpdate={(e) => onSeek(e.currentTarget.currentTime)}
+              onTimeUpdate={(e) => {
+                if (isPhotoMontage) return;
+                const mediaTime = e.currentTarget.currentTime;
+                if (activeClip && activeClip.type !== 'image') {
+                  const sourceStart = activeClip.sourceStart ?? activeClip.start;
+                  const sourceEnd = activeClip.sourceEnd ?? activeClip.end;
+                  const speed = activeClip.speed || 1.0;
+
+                  // If video reached end of current cut segment:
+                  if (mediaTime >= sourceEnd - 0.03) {
+                    const nextClip = clips
+                      .filter((c) => (c.trackId === 'v1' || !c.trackId) && c.type !== 'image')
+                      .sort((a, b) => a.start - b.start)
+                      .find((c) => c.start >= activeClip.end - 0.04);
+
+                    if (nextClip) {
+                      onSeek(nextClip.start);
+                      e.currentTarget.currentTime = nextClip.sourceStart ?? nextClip.start;
+                    } else {
+                      onSeek(0);
+                      if (isPlaying) onPlayPause();
+                    }
+                    return;
+                  }
+
+                  const timelineTime = activeClip.start + (mediaTime - sourceStart) / speed;
+                  if (Math.abs(timelineTime - currentTime) > 0.03) {
+                    onSeek(timelineTime);
+                  }
+                } else {
+                  onSeek(mediaTime);
+                }
+              }}
               onEnded={() => onPlayPause()}
             />
           ) : null}

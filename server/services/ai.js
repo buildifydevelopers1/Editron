@@ -21,6 +21,40 @@ export class AIService {
   }
 
   /**
+   * Resilient LLM invoker with automatic 429 rate limit failover to high-throughput models
+   */
+  static async executeWithModelFallback(client, requestFn, primaryModel, fallbackModel) {
+    const fallback = fallbackModel || config.get('groqFallbackModel') || 'llama-3.1-8b-instant';
+    try {
+      const result = await requestFn(primaryModel);
+      if (result && typeof result === 'object') {
+        result._modelUsed = primaryModel;
+      }
+      return result;
+    } catch (err) {
+      const errStr = (err.message || '').toLowerCase();
+      const status = err.status || err.statusCode;
+      const isRateLimit = status === 429 || errStr.includes('429') || errStr.includes('rate limit') || errStr.includes('tpm') || errStr.includes('tokens per minute');
+      const isNotFound = status === 404 || errStr.includes('not found') || errStr.includes('does not exist') || errStr.includes('deprecated');
+
+      if ((isRateLimit || isNotFound) && fallback && fallback !== primaryModel) {
+        console.warn(`[AI Engine] Model "${primaryModel}" encountered ${isRateLimit ? '429 Rate Limit' : 'Model Error'} (${err.message}). Auto-failing over to high-capacity fallback model "${fallback}"...`);
+        // If rate limited, briefly pause 400ms to allow burst window buffer
+        if (isRateLimit) {
+          await new Promise(r => setTimeout(r, 400));
+        }
+        const fallbackResult = await requestFn(fallback);
+        if (fallbackResult && typeof fallbackResult === 'object') {
+          fallbackResult._modelUsed = fallback;
+          fallbackResult._fallbackFrom = primaryModel;
+        }
+        return fallbackResult;
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Transcribe audio using Groq Whisper (or configured whisper model)
    */
   static async transcribeAudio({ audioFilePath, apiKey, baseUrl, model, language, promptHint }) {
@@ -84,7 +118,8 @@ export class AIService {
     duration = 30,
     apiKey,
     baseUrl,
-    model
+    model,
+    fallbackModel
   }) {
     const client = this.getClient(apiKey, baseUrl);
     const llmModel = model || config.get('groqLlmModel') || 'gpt-oss-120b';
@@ -94,35 +129,48 @@ export class AIService {
       return this.generateHeuristicEdits(prompt, transcript, duration);
     }
 
-    const systemPrompt = `You are Editron's Chief AI Video Editing Director, powering a commercial-grade AI video editing suite.
-Your job is to read the user's prompt, video duration, and speech transcript, and synthesize a complete, professional, broadcast-ready JSON editing plan.
+    const p = (prompt || '').toLowerCase();
+    const isHindi = p.includes('hindi') || p.includes('hinglish') || p.includes('punjabi') || p.includes('desi') || p.includes('bollywood') || p.includes('devanagari');
+
+    const systemPrompt = `You are Editron's Chief AI Video Editing Director, powering a commercial-grade AI video editing suite inspired by DaVinci Resolve.
+Your job is to read the user's prompt, timeline duration (${duration.toFixed(1)}s), and speech transcript, and synthesize a complete, professional, broadcast-ready JSON editing plan.
 
 You have full creative control over:
-1. "aspectRatio": "9:16" for Reels/TikTok/Shorts, "16:9" for Cinematic/YouTube, or "1:1" for Square.
-2. "cuts": Segments of footage with pacing labels and speed.
-3. "transitions": Array of cuts with transition effects chosen from:
+1. "aspectRatio": "9:16" for Reels/Shorts/TikTok/Attitude, "16:9" for YouTube/Cinematic, "2.39:1" for Anamorphic Cinema, or "1:1" for Square.
+2. "cuts": Segment footage with dynamic pacing:
+   - For fast-paced Reels/Shorts: 4 to 8 punchy cuts (0.8s - 2.2s each).
+   - For Podcasts/Talks: 3 to 6 speech-aligned cuts (1.5s - 3.5s each), removing dead pauses.
+   - For Cinematic/Vlog: 3 to 5 steady narrative cuts (2.5s - 4.5s each).
+3. "transitions": Transitions at cut boundaries chosen from:
    ["whip_pan", "zoom_blur", "dip_white", "glitch", "film_burn", "spin", "cube_flip", "push_slide", "split_slice", "iris_wipe", "pixelate", "rgb_split", "shake_impact", "cross_zoom", "ink_bleed", "lens_flare", "page_curl", "dissolve"].
 4. "subtitleStyle": Style preset chosen from:
-   ["hormozi", "mrbeast", "neon_cyberpunk", "retro_vhs", "karaoke_glow", "comic_pop", "typewriter", "golden_luxury", "cinematic_clean", "glitch_hacker", "boxed_pill", "fire_gradient", "documentary_italic", "isometric_3d", "y2k_aesthetic", "news_lower_third", "anime_speed", "drop_shadow_studio"].
-5. "colorGrading": 3-way color wheel adjustments (lift, gamma, gain, offset) plus temperature, tint, contrast, saturation, brightness.
-6. "effects": Visual effects to enable:
+   ["hormozi", "mrbeast", "neon_cyberpunk", "retro_vhs", "karaoke_glow", "comic_pop", "typewriter", "golden_luxury", "cinematic_clean", "glitch_hacker", "boxed_pill", "fire_gradient", "documentary_italic", "isometric_3d", "y2k_aesthetic", "hindi_attitude", "bollywood_royal", "punjabi_drill"].
+   ${isHindi ? `(User requested Hindi/Hinglish! Use 'hindi_attitude' or 'bollywood_royal' with fontFamily "'Poppins', 'Noto Sans Devanagari', 'Mukta', 'Montserrat', sans-serif")` : ''}
+5. "subtitles": Array of timed word objects [{ "id": "w-0", "word": "TEXT", "start": 0.5, "end": 0.9 }] spanning rhythmic intervals across the timeline.
+   ${isHindi ? `(Write authentic Devanagari Hindi or Hinglish attitude lyrics)` : ''}
+6. "colorGrading": 3-way color wheel adjustments (lift, gamma, gain, offset) plus temperature, tint, contrast, saturation, brightness.
+7. "effects": Visual effects to enable:
    ["camera_shake", "film_grain", "glow", "vignette", "rgb_split", "vhs_scanlines", "cinematic_letterbox", "retro_80s", "anamorphic_streak", "blur_bokeh"].
-7. "zooms": Punch-in zoom keyframes on punchlines or key beat drops.
-8. "musicQuery": Search term to fetch matching live internet music (e.g. "Sidhu Moose Wala", "Shubh", "Attitude Hindi Rap", "Phonk Drift", "Lo-Fi Beats").
+8. "zooms": Punch-in zoom keyframes on punchlines or key beat drops.
+9. "musicQuery": Search term to fetch matching live internet music.
 
 Output ONLY a JSON object with this EXACT structure:
 {
-  "summary": "Creative explanation of your editing decisions",
+  "summary": "Creative explanation of your editing decisions and genre styling",
   "aspectRatio": "9:16",
   "cuts": [
-    { "start": 0.0, "end": 4.5, "label": "Hook Intro", "speed": 1.0 },
-    { "start": 4.5, "end": 12.0, "label": "Core Content", "speed": 1.0 }
+    { "start": 0.0, "end": 2.5, "label": "Hook Intro", "speed": 1.0 },
+    { "start": 2.5, "end": 5.8, "label": "Core Content", "speed": 1.0 },
+    { "start": 5.8, "end": 9.2, "label": "Climax Action", "speed": 1.0 },
+    { "start": 9.2, "end": 12.0, "label": "Outro Hook", "speed": 1.0 }
   ],
   "transitions": [
-    { "id": "t-1", "type": "zoom_blur", "name": "Zoom Blur", "timestamp": 4.5, "duration": 0.35 }
+    { "id": "t-1", "type": "whip_pan", "name": "Whip Pan", "timestamp": 2.5, "duration": 0.35 },
+    { "id": "t-2", "type": "zoom_blur", "name": "Zoom Blur", "timestamp": 5.8, "duration": 0.35 },
+    { "id": "t-3", "type": "dip_white", "name": "Flash Shutter", "timestamp": 9.2, "duration": 0.4 }
   ],
   "colorGrading": {
-    "presetName": "Attitude Noir & Gold",
+    "presetName": "Custom Master Grade",
     "temperature": 15,
     "tint": -6,
     "contrast": 35,
@@ -134,23 +182,28 @@ Output ONLY a JSON object with this EXACT structure:
     "offset": { "r": 0.0, "g": 0.0, "b": 0.0, "master": 0.0 }
   },
   "subtitleStyle": {
-    "preset": "neon_cyberpunk",
-    "fontFamily": "'JetBrains Mono', monospace",
-    "fontSize": 36,
-    "textColor": "#00F0FF",
-    "highlightColor": "#FF007F",
+    "preset": "${isHindi ? 'hindi_attitude' : 'hormozi'}",
+    "fontFamily": "'Poppins', 'Noto Sans Devanagari', 'Montserrat', sans-serif",
+    "fontSize": 38,
+    "textColor": "#FFFFFF",
+    "highlightColor": "#FACC15",
     "strokeColor": "#000000",
-    "strokeWidth": 4,
+    "strokeWidth": 5,
     "textCase": "uppercase",
-    "animation": "glow",
-    "positionY": 20
+    "animation": "bounce",
+    "positionY": 22
   },
+  "subtitles": [
+    { "id": "w-0", "word": "${isHindi ? 'खामोशी' : 'LEVEL'}", "start": 0.5, "end": 0.9 },
+    { "id": "w-1", "word": "${isHindi ? 'में' : 'UP'}", "start": 0.9, "end": 1.3 },
+    { "id": "w-2", "word": "${isHindi ? 'मेहनत' : 'TODAY'}", "start": 1.3, "end": 1.9 }
+  ],
   "effects": [
     { "id": "fx-grain", "type": "film_grain", "name": "Film Grain", "enabled": true, "intensity": 30 },
     { "id": "fx-shake", "type": "camera_shake", "name": "Camera Shake", "enabled": true, "intensity": 40 }
   ],
   "zooms": [
-    { "timestamp": 3.2, "duration": 1.5, "scale": 1.22, "anchor": "center", "label": "Beat Punch" }
+    { "timestamp": 2.5, "duration": 1.5, "scale": 1.25, "anchor": "center", "label": "Beat Punch" }
   ],
   "musicQuery": "attitude drill hindi trap"
 }`;
@@ -162,20 +215,28 @@ Transcript: ${JSON.stringify(transcript || 'No transcript available, optimize pa
 Generate the professional timeline editing parameters for this request.`;
 
     try {
-      const response = await client.chat.completions.create({
-        model: llmModel,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage }
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.3
-      });
+      const plan = await this.executeWithModelFallback(
+        client,
+        async (activeModel) => {
+          const response = await client.chat.completions.create({
+            model: activeModel,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userMessage }
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.3
+          });
+          const raw = response.choices[0]?.message?.content || '{}';
+          return JSON.parse(raw);
+        },
+        llmModel,
+        fallbackModel
+      );
 
-      const raw = response.choices[0]?.message?.content || '{}';
-      return JSON.parse(raw);
+      return plan;
     } catch (err) {
-      console.warn(`LLM call with ${llmModel} failed (${err.message}). Falling back to heuristic edit.`);
+      console.warn(`[AI Engine] Both primary and fallback LLM calls failed (${err.message}). Executing dynamic genre-adaptive heuristic edit.`);
       return this.generateHeuristicEdits(prompt, transcript, duration);
     }
   }
@@ -289,158 +350,312 @@ Output ONLY a JSON object with this EXACT structure:
    */
   static generateHeuristicEdits(prompt, transcript, duration = 30) {
     const p = (prompt || '').toLowerCase();
+    const dur = Math.max(4, duration || 12);
 
-    // Default DaVinci Resolve color baseline
-    let colorGrading = {
-      presetName: 'Clean Commercial',
-      temperature: 0,
-      tint: 0,
-      contrast: 15,
-      saturation: 10,
-      lift: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 },
-      gamma: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 },
-      gain: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 },
-      offset: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 }
-    };
+    // 1. Identify Editing Genre from User Intent & Media Context
+    let genre = 'clean_minimal';
+    if (p.includes('podcast') || p.includes('interview') || p.includes('talk') || p.includes('speech') || p.includes('jumpcut') || p.includes('silence') || p.includes('clean cut')) {
+      genre = 'podcast_jumpcut';
+    } else if (p.includes('attitude') || p.includes('hindi') || p.includes('punjabi') || p.includes('desi') || p.includes('bollywood') || p.includes('swag') || p.includes('bhai') || p.includes('status')) {
+      genre = 'attitude_desi';
+    } else if (p.includes('reel') || p.includes('tiktok') || p.includes('shorts') || p.includes('viral') || p.includes('fast') || p.includes('hook') || p.includes('montage') || p.includes('drop')) {
+      genre = 'viral_reel';
+    } else if (p.includes('cinematic') || p.includes('film') || p.includes('movie') || p.includes('hollywood') || p.includes('moody') || p.includes('dramatic') || p.includes('anamorphic')) {
+      genre = 'cinematic_mood';
+    } else if (p.includes('gaming') || p.includes('glitch') || p.includes('cyber') || p.includes('hacker') || p.includes('drill') || p.includes('phonk') || p.includes('action')) {
+      genre = 'gaming_drill';
+    }
 
-    if (p.includes('teal') || p.includes('orange') || p.includes('cinematic') || p.includes('hollywood')) {
+    let aspectRatio = '9:16';
+    let colorGrading;
+    let subtitleStyle;
+    let cuts = [];
+    let transitions = [];
+    let zooms = [];
+    let effects = [];
+    let soundEffects = [];
+    let musicQuery = 'trending attitude viral beat';
+    let summary = '';
+
+    // ==========================================
+    // GENRE 1: PODCAST & TALKING HEAD JUMPCUT
+    // ==========================================
+    if (genre === 'podcast_jumpcut') {
+      aspectRatio = (p.includes('reel') || p.includes('shorts') || p.includes('vertical')) ? '9:16' : '16:9';
+      summary = `Podcast Jump-Cut Master: Eliminated awkward pauses with ${dur > 15 ? '6' : '4'} speech-tightening jump cuts, Rec.709 clean studio grade, and subtle keypoint punch-in zooms.`;
+      
+      const numCuts = Math.max(3, Math.min(7, Math.floor(dur / 2.8)));
+      const cutSlot = dur / numCuts;
+      const cutLabels = ['Speech Hook', 'Core Argument', 'Key Insight', 'Deep Dive', 'Punchline', 'Summary Takeaway', 'Outro CTA'];
+      
+      for (let i = 0; i < numCuts; i++) {
+        cuts.push({
+          start: Math.round(i * cutSlot * 100) / 100,
+          end: Math.round((i + 1) * cutSlot * 100) / 100,
+          label: cutLabels[i % cutLabels.length],
+          speed: 1.0
+        });
+      }
+
+      // Smooth cuts or micro-dissolves
+      for (let i = 1; i < cuts.length; i++) {
+        if (i % 2 === 0) {
+          transitions.push({
+            id: `t-pod-${i}`,
+            type: 'dissolve',
+            name: 'Soft Dissolve',
+            timestamp: cuts[i].start,
+            duration: 0.25
+          });
+        }
+      }
+
       colorGrading = {
-        presetName: 'Cinematic Teal & Orange',
+        presetName: 'Rec.709 Natural Studio',
+        temperature: 4,
+        tint: -2,
+        contrast: 18,
+        saturation: 12,
+        brightness: 1,
+        lift: { r: 0.0, g: 0.0, b: 0.0, master: 0.01 },
+        gamma: { r: 0.01, g: 0.0, b: -0.01, master: 0.0 },
+        gain: { r: 0.04, g: 0.02, b: -0.02, master: 0.02 },
+        offset: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 }
+      };
+
+      subtitleStyle = {
+        preset: 'cinematic_clean',
+        fontFamily: "'Inter', system-ui, sans-serif",
+        fontSize: 28,
+        textColor: '#FFFFFF',
+        highlightColor: '#38BDF8',
+        strokeColor: 'rgba(0,0,0,0.85)',
+        strokeWidth: 3,
+        textCase: 'normal',
+        animation: 'none',
+        positionY: 16
+      };
+
+      zooms.push({
+        timestamp: Math.round(dur * 0.45 * 10) / 10,
+        duration: 1.6,
+        scale: 1.14,
+        anchor: 'center',
+        label: 'Insight Punch-in'
+      });
+
+      effects = [
+        { id: 'fx-vignette', type: 'vignette', name: 'Subtle Studio Vignette', enabled: true, intensity: 20 },
+        { id: 'fx-grain', type: 'film_grain', name: '35mm Film Grain', enabled: false, intensity: 20 },
+        { id: 'fx-shake', type: 'camera_shake', name: 'Camera Shake', enabled: false, intensity: 0 }
+      ];
+      musicQuery = 'lo-fi chill podcast background ambient';
+    }
+
+    // ==========================================
+    // GENRE 2: ATTITUDE & BOLLYWOOD / HINDI DESI
+    // ==========================================
+    else if (genre === 'attitude_desi') {
+      aspectRatio = '9:16';
+      summary = `Attitude Reel Master: High-contrast Noir & Gold grade, bass drop impact at ${(dur * 0.3).toFixed(1)}s, alternating whip pan / bass flash transitions, and bold Devanagari Hindi attitude typography.`;
+
+      const numCuts = Math.max(4, Math.min(8, Math.floor(dur / 2.0)));
+      const cutSlot = dur / numCuts;
+      const cutLabels = ['Attitude Intro', 'Build-up Swagger', '🔥 BASS DROP CLIMAX', 'Rule #1 Statement', 'Slow-Mo Flex', 'King Energy Outro'];
+
+      for (let i = 0; i < numCuts; i++) {
+        cuts.push({
+          start: Math.round(i * cutSlot * 100) / 100,
+          end: Math.round((i + 1) * cutSlot * 100) / 100,
+          label: cutLabels[i % cutLabels.length],
+          speed: i === 2 ? 0.9 : 1.0
+        });
+      }
+
+      const transPool = [
+        { type: 'whip_pan', name: 'Whip Pan' },
+        { type: 'dip_white', name: '⚡ BASS FLASH' },
+        { type: 'zoom_blur', name: 'Zoom Blur' },
+        { type: 'glitch', name: 'Cyber Glitch' }
+      ];
+
+      for (let i = 1; i < cuts.length; i++) {
+        const trans = transPool[(i - 1) % transPool.length];
+        transitions.push({
+          id: `t-att-${i}`,
+          type: i === 2 ? 'dip_white' : trans.type,
+          name: i === 2 ? '⚡ BASS DROP SHUTTER' : trans.name,
+          timestamp: cuts[i].start,
+          duration: i === 2 ? 0.45 : 0.35
+        });
+      }
+
+      colorGrading = {
+        presetName: 'Attitude Noir & Gold',
+        temperature: 15,
+        tint: -8,
+        contrast: 45,
+        saturation: 26,
+        brightness: -2,
+        lift: { r: -0.08, g: 0.02, b: 0.1, master: -0.04 },
+        gamma: { r: 0.04, g: -0.02, b: -0.04, master: 0.0 },
+        gain: { r: 0.18, g: 0.08, b: -0.06, master: 0.08 },
+        offset: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 }
+      };
+
+      subtitleStyle = {
+        preset: 'hindi_attitude',
+        fontFamily: "'Poppins', 'Noto Sans Devanagari', 'Mukta', 'Montserrat', sans-serif",
+        fontSize: 38,
+        textColor: '#FFFFFF',
+        highlightColor: '#FACC15',
+        strokeColor: '#000000',
+        strokeWidth: 5,
+        textCase: 'uppercase',
+        animation: 'bounce',
+        positionY: 22
+      };
+
+      zooms.push({
+        timestamp: Math.round(dur * 0.3 * 10) / 10,
+        duration: 1.8,
+        scale: 1.28,
+        anchor: 'center',
+        label: 'Bass Drop Punch-in'
+      });
+
+      effects = [
+        { id: 'fx-grain', type: 'film_grain', name: '35mm Film Grain', enabled: true, intensity: 35 },
+        { id: 'fx-shake', type: 'camera_shake', name: 'Impact Camera Shake', enabled: true, intensity: 45 },
+        { id: 'fx-vignette', type: 'vignette', name: 'Attitude Noir Vignette', enabled: true, intensity: 40 },
+        { id: 'fx-split', type: 'rgb_split', name: 'RGB Split', enabled: true, intensity: 20 }
+      ];
+
+      soundEffects.push({ timestamp: cuts[1]?.start || 2.5, type: 'whoosh', volume: 0.8 });
+      musicQuery = 'sidhu moose wala shubh attitude drill hindi';
+    }
+
+    // ==========================================
+    // GENRE 3: VIRAL REEL / TIKTOK / SHORTS
+    // ==========================================
+    else if (genre === 'viral_reel') {
+      aspectRatio = '9:16';
+      summary = `Viral Reel Director: High-velocity 0.9s-1.6s pacing, alternating whip/zoom transitions, 2 dynamic beat-drop zooms, punchy viral color grading, and Hormozi bouncy captions.`;
+
+      const numCuts = Math.max(5, Math.min(9, Math.floor(dur / 1.6)));
+      const cutSlot = dur / numCuts;
+      const cutLabels = ['Viral Hook (0-1.5s)', 'Instant Retain Cut', 'Curiosity Spike', 'Climax Action', 'Surprise Reveal', 'Loop CTA'];
+
+      for (let i = 0; i < numCuts; i++) {
+        cuts.push({
+          start: Math.round(i * cutSlot * 100) / 100,
+          end: Math.round((i + 1) * cutSlot * 100) / 100,
+          label: cutLabels[i % cutLabels.length],
+          speed: 1.0
+        });
+      }
+
+      const transPool = [
+        { type: 'zoom_blur', name: 'Zoom Blur' },
+        { type: 'whip_pan', name: 'Whip Pan' },
+        { type: 'dip_white', name: 'Flash Shutter' },
+        { type: 'glitch', name: 'Cyber Glitch' },
+        { type: 'spin', name: 'Warp Spin' }
+      ];
+
+      for (let i = 1; i < cuts.length; i++) {
+        const trans = transPool[(i - 1) % transPool.length];
+        transitions.push({
+          id: `t-reel-${i}`,
+          type: trans.type,
+          name: trans.name,
+          timestamp: cuts[i].start,
+          duration: 0.32
+        });
+      }
+
+      colorGrading = {
+        presetName: 'Punchy Viral Contrast',
+        temperature: 10,
+        tint: -4,
+        contrast: 38,
+        saturation: 28,
+        brightness: 1,
+        lift: { r: -0.04, g: 0.01, b: 0.06, master: -0.02 },
+        gamma: { r: 0.02, g: -0.01, b: -0.02, master: 0.0 },
+        gain: { r: 0.14, g: 0.06, b: -0.04, master: 0.05 },
+        offset: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 }
+      };
+
+      subtitleStyle = {
+        preset: 'hormozi',
+        fontFamily: "'Montserrat', Impact, sans-serif",
+        fontSize: 38,
+        textColor: '#FFFFFF',
+        highlightColor: '#FACC15',
+        strokeColor: '#000000',
+        strokeWidth: 5,
+        textCase: 'uppercase',
+        animation: 'bounce',
+        positionY: 22
+      };
+
+      zooms.push(
+        { timestamp: Math.round(dur * 0.22 * 10) / 10, duration: 1.4, scale: 1.25, anchor: 'center', label: 'Hook Punch' },
+        { timestamp: Math.round(dur * 0.72 * 10) / 10, duration: 1.5, scale: 1.2, anchor: 'center', label: 'Drop Punch' }
+      );
+
+      effects = [
+        { id: 'fx-grain', type: 'film_grain', name: '35mm Film Grain', enabled: true, intensity: 28 },
+        { id: 'fx-shake', type: 'camera_shake', name: 'Camera Shake', enabled: true, intensity: 35 },
+        { id: 'fx-vignette', type: 'vignette', name: 'Cinematic Vignette', enabled: true, intensity: 35 }
+      ];
+      musicQuery = 'viral trending phonk trap bass drop';
+    }
+
+    // ==========================================
+    // GENRE 4: CINEMATIC FILM & DRAMA
+    // ==========================================
+    else if (genre === 'cinematic_mood') {
+      aspectRatio = '2.39:1';
+      summary = `Cinematic Film Master: Hollywood Teal & Orange color profile, 2.39:1 widescreen letterbox, organic 35mm grain, gentle cross dissolves, and luxury gold serif titles.`;
+
+      const numCuts = Math.max(3, Math.min(5, Math.floor(dur / 3.8)));
+      const cutSlot = dur / numCuts;
+      const cutLabels = ['Cinematic Wide Establishing', 'Emotional Mid-Shot', 'Golden Hour Focus', 'Dramatic Climax', 'Fade Out'];
+
+      for (let i = 0; i < numCuts; i++) {
+        cuts.push({
+          start: Math.round(i * cutSlot * 100) / 100,
+          end: Math.round((i + 1) * cutSlot * 100) / 100,
+          label: cutLabels[i % cutLabels.length],
+          speed: 1.0
+        });
+      }
+
+      for (let i = 1; i < cuts.length; i++) {
+        transitions.push({
+          id: `t-cine-${i}`,
+          type: i % 2 === 1 ? 'dissolve' : 'film_burn',
+          name: i % 2 === 1 ? 'Cross Dissolve' : 'Film Burn',
+          timestamp: cuts[i].start,
+          duration: 0.6
+        });
+      }
+
+      colorGrading = {
+        presetName: 'Hollywood Teal & Orange 35mm',
         temperature: 18,
         tint: -6,
         contrast: 32,
-        saturation: 22,
+        saturation: 20,
+        brightness: 0,
         lift: { r: -0.06, g: 0.04, b: 0.12, master: -0.03 },
         gamma: { r: 0.02, g: -0.02, b: -0.04, master: 0.0 },
         gain: { r: 0.14, g: 0.08, b: -0.08, master: 0.05 },
         offset: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 }
       };
-    } else if (p.includes('vintage') || p.includes('film') || p.includes('retro')) {
-      colorGrading = {
-        presetName: 'Vintage 35mm Film',
-        temperature: 24,
-        tint: 10,
-        contrast: -8,
-        saturation: -15,
-        lift: { r: 0.08, g: 0.04, b: 0.0, master: 0.06 },
-        gamma: { r: 0.03, g: 0.02, b: -0.03, master: 0.0 },
-        gain: { r: 0.05, g: 0.03, b: -0.06, master: -0.02 },
-        offset: { r: 0.02, g: 0.0, b: -0.02, master: 0.0 }
-      };
-    } else if (p.includes('cyber') || p.includes('neon') || p.includes('synth')) {
-      colorGrading = {
-        presetName: 'Cyberpunk Neon',
-        temperature: -25,
-        tint: 35,
-        contrast: 40,
-        saturation: 45,
-        lift: { r: 0.12, g: -0.05, b: 0.18, master: -0.05 },
-        gamma: { r: -0.08, g: 0.04, b: 0.12, master: 0.0 },
-        gain: { r: 0.18, g: 0.02, b: 0.15, master: 0.08 },
-        offset: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 }
-      };
-    } else if (p.includes('noir') || p.includes('black and white') || p.includes('b&w')) {
-      colorGrading = {
-        presetName: 'Moody Film Noir',
-        temperature: 0,
-        tint: 0,
-        contrast: 45,
-        saturation: -100,
-        lift: { r: -0.05, g: -0.05, b: -0.05, master: -0.08 },
-        gamma: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 },
-        gain: { r: 0.1, g: 0.1, b: 0.1, master: 0.12 },
-        offset: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 }
-      };
-    }
 
-    // Determine aspect ratio from prompt
-    let aspectRatio = '16:9';
-    if (p.includes('reel') || p.includes('shorts') || p.includes('tiktok') || p.includes('9:16') || p.includes('vertical') || p.includes('attitude') || p.includes('photo')) {
-      aspectRatio = '9:16';
-    } else if (p.includes('1:1') || p.includes('square') || p.includes('instagram post')) {
-      aspectRatio = '1:1';
-    }
-
-    // 18+ Subtitle Styles Engine
-    let subtitleStyle = {
-      preset: 'hormozi',
-      fontFamily: "'Montserrat', Impact, sans-serif",
-      fontSize: 34,
-      textColor: '#FFFFFF',
-      highlightColor: '#FACC15',
-      strokeColor: '#000000',
-      strokeWidth: 4,
-      textCase: 'uppercase',
-      animation: 'bounce',
-      positionY: 22
-    };
-
-    if (p.includes('neon') || p.includes('cyber') || p.includes('matrix')) {
-      subtitleStyle = {
-        preset: 'neon_cyberpunk',
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: 34,
-        textColor: '#00F0FF',
-        highlightColor: '#FF007F',
-        strokeColor: '#000000',
-        strokeWidth: 4,
-        textCase: 'uppercase',
-        animation: 'glow',
-        positionY: 20
-      };
-    } else if (p.includes('vhs') || p.includes('retro') || p.includes('80s')) {
-      subtitleStyle = {
-        preset: 'retro_vhs',
-        fontFamily: "'VT323', monospace, 'Courier New'",
-        fontSize: 36,
-        textColor: '#FFDF00',
-        highlightColor: '#FF0055',
-        strokeColor: '#000000',
-        strokeWidth: 3,
-        textCase: 'uppercase',
-        animation: 'none',
-        positionY: 18
-      };
-    } else if (p.includes('karaoke') || p.includes('sing') || p.includes('lyrics')) {
-      subtitleStyle = {
-        preset: 'karaoke_glow',
-        fontFamily: "'Inter', sans-serif",
-        fontSize: 36,
-        textColor: 'rgba(255,255,255,0.4)',
-        highlightColor: '#38BDF8',
-        strokeColor: '#000000',
-        strokeWidth: 4,
-        textCase: 'normal',
-        animation: 'glow',
-        positionY: 24
-      };
-    } else if (p.includes('comic') || p.includes('cartoon') || p.includes('funny')) {
-      subtitleStyle = {
-        preset: 'comic_pop',
-        fontFamily: "'Bangers', 'Komika Axis', cursive, sans-serif",
-        fontSize: 42,
-        textColor: '#FFF500',
-        highlightColor: '#FF3366',
-        strokeColor: '#000000',
-        strokeWidth: 6,
-        textCase: 'uppercase',
-        animation: 'pop',
-        positionY: 25
-      };
-    } else if (p.includes('typewriter') || p.includes('terminal') || p.includes('coding')) {
-      subtitleStyle = {
-        preset: 'typewriter',
-        fontFamily: "'Courier New', Courier, monospace",
-        fontSize: 28,
-        textColor: '#00FF66',
-        highlightColor: '#FFFFFF',
-        strokeColor: '#000000',
-        strokeWidth: 2,
-        textCase: 'normal',
-        animation: 'none',
-        positionY: 16
-      };
-    } else if (p.includes('gold') || p.includes('luxury') || p.includes('classy')) {
       subtitleStyle = {
         preset: 'golden_luxury',
         fontFamily: "'Cinzel', 'Playfair Display', Georgia, serif",
@@ -453,149 +668,166 @@ Output ONLY a JSON object with this EXACT structure:
         animation: 'glow',
         positionY: 20
       };
-    } else if (p.includes('glitch') || p.includes('hacker')) {
+
+      effects = [
+        { id: 'fx-letterbox', type: 'cinematic_letterbox', name: '2.39:1 Cinema Letterbox', enabled: true, intensity: 100 },
+        { id: 'fx-grain', type: 'film_grain', name: '35mm Kodak Grain', enabled: true, intensity: 35 },
+        { id: 'fx-vignette', type: 'vignette', name: 'Anamorphic Vignette', enabled: true, intensity: 30 }
+      ];
+      musicQuery = 'hans zimmer cinematic atmospheric trailer';
+    }
+
+    // ==========================================
+    // GENRE 5: GAMING & CYBER DRILL
+    // ==========================================
+    else if (genre === 'gaming_drill') {
+      aspectRatio = (p.includes('reel') || p.includes('shorts')) ? '9:16' : '16:9';
+      summary = `Cyberpunk Gaming Master: High-tempo beat cuts, RGB chromatic aberration, glitch transitions, Cyberpunk Neon grade, and electric JetBrains Mono captions.`;
+
+      const numCuts = Math.max(4, Math.min(8, Math.floor(dur / 1.8)));
+      const cutSlot = dur / numCuts;
+      const cutLabels = ['Clutch Load-In', 'Impact Frag', 'Headshot Climax', 'Flick Shot', 'Victory Screen'];
+
+      for (let i = 0; i < numCuts; i++) {
+        cuts.push({
+          start: Math.round(i * cutSlot * 100) / 100,
+          end: Math.round((i + 1) * cutSlot * 100) / 100,
+          label: cutLabels[i % cutLabels.length],
+          speed: 1.0
+        });
+      }
+
+      const transPool = [
+        { type: 'glitch', name: 'Cyber Glitch' },
+        { type: 'rgb_split', name: 'RGB Split' },
+        { type: 'pixelate', name: 'Pixelate' },
+        { type: 'shake_impact', name: 'Impact Shake' }
+      ];
+
+      for (let i = 1; i < cuts.length; i++) {
+        const trans = transPool[(i - 1) % transPool.length];
+        transitions.push({
+          id: `t-game-${i}`,
+          type: trans.type,
+          name: trans.name,
+          timestamp: cuts[i].start,
+          duration: 0.3
+        });
+      }
+
+      colorGrading = {
+        presetName: 'Cyberpunk Neon',
+        temperature: -22,
+        tint: 32,
+        contrast: 42,
+        saturation: 45,
+        brightness: 0,
+        lift: { r: 0.12, g: -0.05, b: 0.18, master: -0.05 },
+        gamma: { r: -0.08, g: 0.04, b: 0.12, master: 0.0 },
+        gain: { r: 0.18, g: 0.02, b: 0.15, master: 0.08 },
+        offset: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 }
+      };
+
       subtitleStyle = {
-        preset: 'glitch_hacker',
-        fontFamily: "'Press Start 2P', monospace",
-        fontSize: 30,
-        textColor: '#00FF41',
-        highlightColor: '#FF0033',
+        preset: 'neon_cyberpunk',
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: 34,
+        textColor: '#00F0FF',
+        highlightColor: '#FF007F',
         strokeColor: '#000000',
         strokeWidth: 4,
         textCase: 'uppercase',
-        animation: 'pop',
-        positionY: 22
-      };
-    } else if (p.includes('fire') || p.includes('flame') || p.includes('hot')) {
-      subtitleStyle = {
-        preset: 'fire_gradient',
-        fontFamily: "'Impact', sans-serif",
-        fontSize: 40,
-        textColor: '#FF4500',
-        highlightColor: '#FFD700',
-        strokeColor: '#000000',
-        strokeWidth: 5,
-        textCase: 'uppercase',
-        animation: 'bounce',
-        positionY: 22
-      };
-    } else if (p.includes('box') || p.includes('pill')) {
-      subtitleStyle = {
-        preset: 'boxed_pill',
-        fontFamily: "'Montserrat', sans-serif",
-        fontSize: 32,
-        textColor: '#000000',
-        highlightColor: '#000000',
-        strokeColor: 'transparent',
-        strokeWidth: 0,
-        backgroundColor: '#FACC15',
-        textCase: 'uppercase',
-        animation: 'pop',
+        animation: 'glow',
         positionY: 20
       };
-    } else if (p.includes('mrbeast') || p.includes('pop') || p.includes('bouncy')) {
-      subtitleStyle = {
-        preset: 'mrbeast',
-        fontFamily: "'Komika Axis', Impact, sans-serif",
-        fontSize: 38,
-        textColor: '#FFFFFF',
-        highlightColor: '#00FFAA',
-        strokeColor: '#000000',
-        strokeWidth: 5,
-        textCase: 'uppercase',
-        animation: 'pop',
-        positionY: 22
-      };
-    } else if (p.includes('minimal') || p.includes('subtle') || p.includes('clean') || p.includes('cinematic')) {
-      subtitleStyle = {
-        preset: 'cinematic_clean',
-        fontFamily: "'Inter', system-ui, sans-serif",
-        fontSize: 26,
-        textColor: '#F3F4F6',
-        highlightColor: '#FFFFFF',
-        strokeColor: 'rgba(0,0,0,0.7)',
-        strokeWidth: 2,
-        textCase: 'normal',
-        animation: 'none',
-        positionY: 15
-      };
+
+      effects = [
+        { id: 'fx-split', type: 'rgb_split', name: 'RGB Split', enabled: true, intensity: 35 },
+        { id: 'fx-shake', type: 'camera_shake', name: 'Impact Shake', enabled: true, intensity: 45 },
+        { id: 'fx-vhs', type: 'vhs_scanlines', name: 'CRT Scanlines', enabled: true, intensity: 25 }
+      ];
+      musicQuery = 'phonk gaming drift montage bass';
     }
 
-    // Smart Cuts & Pacing
-    const cuts = [];
-    const transitions = [];
-    const transitionPool = [
-      { type: 'zoom_blur', name: 'Zoom Blur' },
-      { type: 'whip_pan', name: 'Whip Pan' },
-      { type: 'cube_flip', name: '3D Cube Flip' },
-      { type: 'glitch', name: 'Cyber Glitch' },
-      { type: 'film_burn', name: 'Film Burn' },
-      { type: 'spin', name: 'Warp Spin' },
-      { type: 'dip_white', name: 'Flash Shutter' }
-    ];
+    // ==========================================
+    // GENRE 6: CLEAN COMMERCIAL / MINIMAL
+    // ==========================================
+    else {
+      aspectRatio = (p.includes('reel') || p.includes('shorts') || p.includes('vertical')) ? '9:16' : '16:9';
+      summary = `Clean Commercial Master: Balanced 4-shot narrative pacing, Rec.709 clean contrast, smooth zoom transitions, and modern bold subtitles.`;
 
-    if (duration > 10 && (p.includes('cut') || p.includes('fast') || p.includes('viral') || p.includes('attitude') || p.includes('reel'))) {
-      const step = Math.min(3.5, duration / 3);
-      cuts.push({ start: 0, end: step, label: 'Hook Intro', speed: 1.0 });
-      cuts.push({ start: step, end: Math.min(step * 2, duration), label: 'Climax & Drop', speed: 1.0 });
-      if (duration > step * 2 + 1) {
-        cuts.push({ start: step * 2, end: duration, label: 'Outro Impact', speed: 1.0 });
+      const numCuts = Math.max(3, Math.min(6, Math.floor(dur / 2.5)));
+      const cutSlot = dur / numCuts;
+      const cutLabels = ['Intro Hook', 'Feature Demo', 'Core Benefits', 'Final Call'];
+
+      for (let i = 0; i < numCuts; i++) {
+        cuts.push({
+          start: Math.round(i * cutSlot * 100) / 100,
+          end: Math.round((i + 1) * cutSlot * 100) / 100,
+          label: cutLabels[i % cutLabels.length],
+          speed: 1.0
+        });
       }
 
-      // Add dynamic transitions at cut boundaries
       for (let i = 1; i < cuts.length; i++) {
-        const trans = transitionPool[(i - 1) % transitionPool.length];
         transitions.push({
-          id: `t-${i}-${Date.now()}`,
-          type: trans.type,
-          name: trans.name,
+          id: `t-clean-${i}`,
+          type: i % 2 === 0 ? 'zoom_blur' : 'whip_pan',
+          name: i % 2 === 0 ? 'Zoom Blur' : 'Whip Pan',
           timestamp: cuts[i].start,
           duration: 0.35
         });
       }
-    } else {
-      cuts.push({ start: 0, end: duration, label: 'Full Sequence', speed: 1.0 });
+
+      colorGrading = {
+        presetName: 'Clean Commercial Rec.709',
+        temperature: 6,
+        tint: -2,
+        contrast: 22,
+        saturation: 15,
+        brightness: 0,
+        lift: { r: -0.02, g: 0.01, b: 0.03, master: -0.01 },
+        gamma: { r: 0.01, g: -0.01, b: -0.01, master: 0.0 },
+        gain: { r: 0.08, g: 0.04, b: -0.02, master: 0.03 },
+        offset: { r: 0.0, g: 0.0, b: 0.0, master: 0.0 }
+      };
+
+      subtitleStyle = {
+        preset: 'hormozi',
+        fontFamily: "'Montserrat', sans-serif",
+        fontSize: 36,
+        textColor: '#FFFFFF',
+        highlightColor: '#FACC15',
+        strokeColor: '#000000',
+        strokeWidth: 4,
+        textCase: 'uppercase',
+        animation: 'bounce',
+        positionY: 20
+      };
+
+      effects = [
+        { id: 'fx-vignette', type: 'vignette', name: 'Clean Vignette', enabled: true, intensity: 25 },
+        { id: 'fx-grain', type: 'film_grain', name: 'Film Grain', enabled: false, intensity: 20 }
+      ];
+      musicQuery = 'upbeat corporate clean modern acoustic';
     }
 
-    // Dynamic Zoom Keyframes
-    const zooms = [];
-    if (p.includes('zoom') || p.includes('punch') || p.includes('viral') || p.includes('attitude') || p.includes('drop')) {
-      zooms.push({ timestamp: Math.min(2.5, duration * 0.25), duration: 1.5, scale: 1.22, anchor: 'center', label: 'Beat Drop Punch-in' });
-      if (duration > 8) {
-        zooms.push({ timestamp: Math.min(7.0, duration * 0.7), duration: 1.8, scale: 1.18, anchor: 'center', label: 'Punchline Emphasis' });
-      }
-    }
-
-    // Visual OpenFX
-    const effects = [
-      { id: 'fx-vignette', type: 'vignette', name: 'Cinematic Vignette', enabled: true, intensity: 35 },
-      { id: 'fx-grain', type: 'film_grain', name: '35mm Film Grain', enabled: p.includes('vintage') || p.includes('film') || p.includes('attitude'), intensity: 30 },
-      { id: 'fx-shake', type: 'camera_shake', name: 'Camera Shake', enabled: p.includes('attitude') || p.includes('punch') || p.includes('bass'), intensity: 45 },
-      { id: 'fx-glow', type: 'glow', name: 'Dream Glow', enabled: p.includes('neon') || p.includes('cyber'), intensity: 40 },
-      { id: 'fx-split', type: 'rgb_split', name: 'RGB Split', enabled: p.includes('glitch') || p.includes('cyber') || p.includes('attitude'), intensity: 25 }
-    ];
-
-    // Music Search Term recommendation
-    let musicQuery = 'attitude trending hindi reel';
-    if (p.includes('phonk')) musicQuery = 'phonk drift attitude';
-    else if (p.includes('punjabi') || p.includes('shubh') || p.includes('sidhu')) musicQuery = 'punjabi attitude drill';
-    else if (p.includes('chill') || p.includes('lofi')) musicQuery = 'lo-fi chill aesthetic';
-    else if (p.includes('hip hop') || p.includes('rap')) musicQuery = 'hindi rap hip-hop beat';
-    else if (p.includes('techno') || p.includes('edm')) musicQuery = 'edm bass drop';
+    // 2. Synthesize Timed Subtitles (Directly within Heuristic Engine so offline never misses subtitles!)
+    const subtitlesResult = this.generateHeuristicSubtitlesFromPrompt(prompt, dur, subtitleStyle.preset);
 
     return {
-      summary: `AI Director synthesized dynamic ${aspectRatio} edit plan: Configured ${subtitleStyle.preset} subtitles, applied ${colorGrading.presetName}, added ${transitions.length} transitions, ${zooms.length} punch-in zooms, and optimized pacing.`,
+      summary,
       aspectRatio,
       cuts,
       transitions,
       colorGrading,
       subtitleStyle,
+      subtitles: subtitlesResult.words || [],
       effects,
       zooms,
       musicQuery,
-      soundEffects: [
-        { timestamp: 0.1, type: 'whoosh', volume: 0.6 }
-      ]
+      soundEffects: soundEffects.length > 0 ? soundEffects : [{ timestamp: 0.1, type: 'whoosh', volume: 0.6 }],
+      genreDetected: genre
     };
   }
 
@@ -766,24 +998,30 @@ Requested Subtitle Preset: "${stylePreset}"
 Generate synchronized word subtitles for this sequence.`;
 
     try {
-      const response = await client.chat.completions.create({
-        model: llmModel,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage }
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.3
-      });
+      const parsed = await this.executeWithModelFallback(
+        client,
+        async (activeModel) => {
+          const response = await client.chat.completions.create({
+            model: activeModel,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userMessage }
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.3
+          });
+          const raw = response.choices[0]?.message?.content || '{}';
+          return JSON.parse(raw);
+        },
+        llmModel
+      );
 
-      const raw = response.choices[0]?.message?.content || '{}';
-      const parsed = JSON.parse(raw);
       if (parsed.words && Array.isArray(parsed.words) && parsed.words.length > 0) {
         return parsed;
       }
       return this.generateHeuristicSubtitlesFromPrompt(prompt, duration, stylePreset);
     } catch (err) {
-      console.warn(`Subtitle generation LLM call (${llmModel}) failed:`, err.message);
+      console.warn(`[AI Engine] Subtitle generation LLM failed (${err.message}). Using dynamic heuristic subtitle engine.`);
       return this.generateHeuristicSubtitlesFromPrompt(prompt, duration, stylePreset);
     }
   }
@@ -1122,24 +1360,30 @@ Video Duration: ${duration.toFixed(1)}s
 Synthesize the final improved master timeline now.`;
 
     try {
-      const response = await client.chat.completions.create({
-        model: llmModel,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage }
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.25
-      });
+      const refined = await this.executeWithModelFallback(
+        client,
+        async (activeModel) => {
+          const response = await client.chat.completions.create({
+            model: activeModel,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userMessage }
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.25
+          });
+          const raw = response.choices[0]?.message?.content || '{}';
+          return JSON.parse(raw);
+        },
+        llmModel
+      );
 
-      const raw = response.choices[0]?.message?.content || '{}';
-      const refined = JSON.parse(raw);
       if (refined.colorGrading && refined.subtitleStyle) {
         return refined;
       }
       return this.generateHeuristicVisionRefinement(draftPlan, visionAnalysis, prompt);
     } catch (err) {
-      console.warn(`Vision refinement LLM call (${llmModel}) failed:`, err.message);
+      console.warn(`[AI Engine] Vision refinement LLM failed (${err.message}). Executing heuristic polish.`);
       return this.generateHeuristicVisionRefinement(draftPlan, visionAnalysis, prompt);
     }
   }

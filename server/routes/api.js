@@ -92,17 +92,19 @@ router.get('/config', (req, res) => {
     apiKeyMasked: all.groqApiKey ? `${all.groqApiKey.slice(0, 4)}...${all.groqApiKey.slice(-4)}` : '',
     baseUrl: all.groqBaseUrl,
     llmModel: all.groqLlmModel,
+    fallbackModel: all.groqFallbackModel,
     whisperModel: all.groqWhisperModel,
     visionModel: all.groqVisionModel
   });
 });
 
 router.post('/config', (req, res) => {
-  const { apiKey, baseUrl, llmModel, whisperModel, visionModel } = req.body;
+  const { apiKey, baseUrl, llmModel, fallbackModel, whisperModel, visionModel } = req.body;
   const updated = config.update({
     groqApiKey: apiKey,
     groqBaseUrl: baseUrl,
     groqLlmModel: llmModel,
+    groqFallbackModel: fallbackModel,
     groqWhisperModel: whisperModel,
     groqVisionModel: visionModel
   });
@@ -113,6 +115,7 @@ router.post('/config', (req, res) => {
       hasApiKey: updated.hasApiKey,
       baseUrl: updated.groqBaseUrl,
       llmModel: updated.groqLlmModel,
+      fallbackModel: updated.groqFallbackModel,
       whisperModel: updated.groqWhisperModel,
       visionModel: updated.groqVisionModel
     }
@@ -735,52 +738,65 @@ router.post('/autonomous-director-loop', async (req, res) => {
     const { prompt = 'Autonomous broadcast edit with viral hook', videoPath, duration = 30, photos = [], audioTrack } = req.body;
     const resolvedVideoPath = resolveMediaFilePath(videoPath);
 
-    // --- PASS 1: Generate Initial Draft Edit Plan ---
+    // --- PASS 1: Generate Initial High-Fidelity Director Plan ---
     const draftPlan = await AIService.generateTimelineEdits({
       prompt,
       duration: duration || 30
     });
 
-    // --- PASS 2: Multimodal Vision Critic Inspection ---
+    // --- PASS 2: Multimodal Vision Critic Inspection (Optimized Frame Budget) ---
     let frames = [];
     if (resolvedVideoPath) {
-      frames = await FFmpegService.extractKeyframes(resolvedVideoPath, duration || 12, 4, uploadDir);
+      frames = await FFmpegService.extractKeyframes(resolvedVideoPath, duration || 12, 2, uploadDir);
     } else if (photos && photos.length > 0) {
-      // Use photo files as frames
-      frames = photos.slice(0, 4).map((p, idx) => ({
+      frames = photos.slice(0, 2).map((p, idx) => ({
         timestamp: idx * (duration / Math.max(photos.length, 1)),
         path: resolveMediaFilePath(p.url || p.path) || p.path || p.url,
         url: p.url
       })).filter(f => f.path && fs.existsSync(f.path));
     }
 
-    // Call Multimodal Vision Critic
-    const visionCritique = await AIService.analyzeVideoVision({
-      frames,
-      prompt: `Critique this video edit for: shot composition, lighting consistency, face framing for 9:16 safe zones, color grading balance, and subtitle contrast. User prompt: "${prompt}"`
-    });
+    let visionCritique = null;
+    let finalPlan = draftPlan;
 
-    // --- PASS 3: AI Self-Improvement & Master Polish ---
-    const finalPlan = await AIService.refineEditsWithVisionCritic({
-      prompt,
-      draftPlan,
-      visionAnalysis: visionCritique,
-      duration: duration || 30
-    });
-
-    // Ensure subtitles are populated in final plan
-    if (!finalPlan.subtitles || finalPlan.subtitles.length === 0) {
-      const generatedSubs = await AIService.generateSubtitlesFromPrompt({
-        prompt,
-        duration: duration || 30,
-        stylePreset: finalPlan.subtitleStyle?.preset || 'hormozi'
+    if (frames.length > 0) {
+      visionCritique = await AIService.analyzeVideoVision({
+        frames,
+        prompt: `Critique edit for shot composition, lighting consistency, 9:16 framing, color balance, and subtitle readability. Prompt: "${prompt}"`
       });
-      finalPlan.subtitles = generatedSubs.words;
-      if (!finalPlan.subtitleStyle) finalPlan.subtitleStyle = generatedSubs.subtitleStyle;
+
+      // --- PASS 3: AI Self-Improvement & Master Polish ---
+      finalPlan = await AIService.refineEditsWithVisionCritic({
+        prompt,
+        draftPlan,
+        visionAnalysis: visionCritique,
+        duration: duration || 30
+      });
     }
+
+    // Ensure subtitles are populated (either from plan, or draft plan, or heuristic)
+    if (!finalPlan.subtitles || finalPlan.subtitles.length === 0) {
+      if (draftPlan.subtitles && draftPlan.subtitles.length > 0) {
+        finalPlan.subtitles = draftPlan.subtitles;
+      } else {
+        const generatedSubs = await AIService.generateSubtitlesFromPrompt({
+          prompt,
+          duration: duration || 30,
+          stylePreset: finalPlan.subtitleStyle?.preset || 'hormozi'
+        });
+        finalPlan.subtitles = generatedSubs.words;
+        if (!finalPlan.subtitleStyle) finalPlan.subtitleStyle = generatedSubs.subtitleStyle;
+      }
+    }
+
+    const modelUsed = finalPlan._modelUsed || draftPlan._modelUsed || 'AI Director';
+    const fallbackTriggered = Boolean(finalPlan._fallbackFrom || draftPlan._fallbackFrom);
 
     res.json({
       success: true,
+      modelUsed,
+      fallbackTriggered,
+      genreDetected: finalPlan.genreDetected || draftPlan.genreDetected || 'General Edit',
       draftPlan,
       frames,
       visionCritique,

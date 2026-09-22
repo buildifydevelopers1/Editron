@@ -18,6 +18,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const [apiKey, setApiKey] = useState('');
   const [llmModel, setLlmModel] = useState(config?.llmModel || 'gpt-oss-120b');
+  const [fallbackModel, setFallbackModel] = useState(config?.fallbackModel || 'llama-3.1-8b-instant');
   const [whisperModel, setWhisperModel] = useState(config?.whisperModel || 'whisper-large-v3');
   const [visionModel, setVisionModel] = useState(config?.visionModel || 'llama-3.2-11b-vision-preview');
   const [baseUrl, setBaseUrl] = useState(config?.baseUrl || 'https://api.groq.com/openai/v1');
@@ -32,6 +33,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const payload: any = {
         llmModel,
+        fallbackModel,
         whisperModel,
         visionModel,
         baseUrl,
@@ -119,6 +121,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             />
             <p className="text-[10px] text-gray-500">
               Default: <code className="text-cyan-400">gpt-oss-120b</code>. Can also be set to <code className="text-gray-400">llama-3.3-70b-versatile</code>.
+            </p>
+          </div>
+
+          {/* 429 Fallback Model */}
+          <div className="space-y-1">
+            <label className="text-xs font-mono text-gray-300 flex items-center space-x-1">
+              <Cpu className="w-3.5 h-3.5 text-emerald-400" />
+              <span>429 RATE-LIMIT FALLBACK MODEL (HIGH CAPACITY)</span>
+            </label>
+            <input
+              type="text"
+              value={fallbackModel}
+              onChange={(e) => setFallbackModel(e.target.value)}
+              placeholder="llama-3.1-8b-instant"
+              className="w-full bg-resolve-950 border border-resolve-800 focus:border-resolve-orange rounded px-3 py-2 text-xs text-white placeholder-gray-600 font-mono focus:outline-none"
+            />
+            <p className="text-[10px] text-gray-500">
+              Default: <code className="text-emerald-400">llama-3.1-8b-instant</code> (30,000 TPM limit). Prevents rate-limit crashes by automatically taking over if primary model reaches Groq limits.
             </p>
           </div>
 
