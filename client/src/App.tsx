@@ -39,6 +39,7 @@ import {
   fetchAssetLibrary,
   fetchConfig,
   generatePhotosToReel,
+  renderExport,
   requestAIEdits,
   requestAutonomousDirectorLoop,
   requestGenerateSubtitles,
@@ -207,8 +208,16 @@ export function App() {
   // AI & Background Processing State
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
-  const [processingPass, setProcessingPass] = useState<number>(0); // 0: idle, 1: Draft, 2: Vision Critic, 3: Master Polish
+  const [processingPass, setProcessingPass] = useState<number>(0); // 0: idle, 1: Whisper, 2: AI Director, 3: Vision, 4: Polish
   const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [subtitleSource, setSubtitleSource] = useState<'whisper' | 'llm' | 'fallback' | null>(null);
+  const [effectsSource, setEffectsSource] = useState<'vision' | 'llm' | null>(null);
+  const [transcriptPreview, setTranscriptPreview] = useState<string | null>(null);
+
+  // Export state
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportUrl, setExportUrl] = useState<string | null>(null);
+  const [currentPlan, setCurrentPlan] = useState<any | null>(null);
 
   // Hidden File Input Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -686,7 +695,17 @@ export function App() {
         const modelNote = result.modelUsed ? ` • [Model: ${result.modelUsed}${result.fallbackTriggered ? ' (Rate-Limit Protected)' : ''}]` : '';
         const impCount = result.improvements?.length || 0;
         const impSummary = impCount > 0 ? ` • [Mastered: ${result.improvements.slice(0, 2).join(' • ')}]` : '';
-        setAiSummary((plan.summary || 'AI Director successfully edited the video.') + modelNote + impSummary);
+        const sourceNote = result.subtitleSource === 'whisper' ? ' • 🎙️ Real Whisper Subtitles' : result.subtitleSource === 'llm' ? ' • ✨ AI-Generated Subtitles' : '';
+        setAiSummary((plan.summary || 'AI Director successfully edited the video.') + modelNote + impSummary + sourceNote);
+
+        // Store plan for export + metadata
+        setCurrentPlan(plan);
+        setSubtitleSource(result.subtitleSource || 'llm');
+        setEffectsSource(result.effectsSource as 'vision' | 'llm' || 'llm');
+        if (result.transcriptSummary?.textPreview) {
+          setTranscriptPreview(result.transcriptSummary.textPreview);
+        }
+        setExportUrl(null); // reset previous export
 
         // Apply Aspect Ratio
         if (plan.aspectRatio) {
@@ -1253,6 +1272,80 @@ export function App() {
         onOpenMultiComposer={() => setIsMultiComposerOpen(true)}
       />
 
+      {/* Export + Subtitle Source Info Bar */}
+      {(currentPlan || subtitleSource) && !isProcessing && (
+        <div className="h-8 bg-resolve-950 border-b border-resolve-800/60 flex items-center justify-between px-4 text-xs select-none">
+          {/* Subtitle Source Badge */}
+          <div className="flex items-center space-x-3">
+            {subtitleSource === 'whisper' && (
+              <span className="flex items-center space-x-1 bg-emerald-900/40 text-emerald-400 border border-emerald-700/50 rounded px-2 py-0.5 font-mono">
+                <Sparkles className="w-3 h-3" />
+                <span>🎙️ Whisper Subtitles — Real spoken words</span>
+              </span>
+            )}
+            {subtitleSource === 'llm' && (
+              <span className="flex items-center space-x-1 bg-blue-900/30 text-blue-400 border border-blue-700/40 rounded px-2 py-0.5 font-mono">
+                <Wand2 className="w-3 h-3" />
+                <span>✨ AI-Generated Subtitles</span>
+              </span>
+            )}
+            {effectsSource === 'vision' && (
+              <span className="flex items-center space-x-1 bg-purple-900/30 text-purple-400 border border-purple-700/40 rounded px-2 py-0.5 font-mono">
+                <Eye className="w-3 h-3" />
+                <span>👁️ Vision-Driven Effects</span>
+              </span>
+            )}
+            {transcriptPreview && (
+              <span className="text-gray-500 font-mono truncate max-w-xs" title={transcriptPreview}>
+                "{transcriptPreview.slice(0, 60)}{transcriptPreview.length > 60 ? '…' : ''}"
+              </span>
+            )}
+          </div>
+
+          {/* Export Button */}
+          <div className="flex items-center space-x-2">
+            {exportUrl && (
+              <a
+                href={exportUrl}
+                download
+                className="flex items-center space-x-1 bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-0.5 rounded text-xs font-bold transition"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Download Video</span>
+              </a>
+            )}
+            {currentPlan && videoPath && (
+              <button
+                disabled={isExporting}
+                onClick={async () => {
+                  if (!videoPath || !currentPlan) return;
+                  setIsExporting(true);
+                  setExportUrl(null);
+                  try {
+                    const result = await renderExport({
+                      videoPath,
+                      plan: currentPlan,
+                      audioTrackPath: null,
+                      resolution: '1080p',
+                      aspectRatio: currentPlan.aspectRatio || aspectRatio,
+                    });
+                    setExportUrl(resolveAssetUrl(result.outputUrl));
+                  } catch (err: any) {
+                    alert(`Export failed: ${err.message}`);
+                  } finally {
+                    setIsExporting(false);
+                  }
+                }}
+                className="flex items-center space-x-1 bg-resolve-orange hover:bg-resolve-orange-hover disabled:opacity-50 text-black px-3 py-0.5 rounded text-xs font-bold transition"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>{isExporting ? 'Rendering…' : 'Export Video'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main Workspace Dynamic Page Body */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* EDIT / CUT PAGE: Monitor + Inspector + Timeline */}
@@ -1481,11 +1574,11 @@ export function App() {
                   <h3 className="text-sm font-extrabold tracking-wide uppercase flex items-center space-x-2">
                     <span>Autonomous AI Director</span>
                     <span className="text-[10px] font-mono font-normal bg-resolve-800 text-resolve-orange px-2 py-0.5 rounded border border-resolve-700">
-                      3-Pass Pipeline
+                      4-Pass Pipeline
                     </span>
                   </h3>
                   <p className="text-xs text-gray-400">
-                    Drafting &bull; Vision Critic Inspection &bull; Master Polish
+                    Whisper Transcription &bull; AI Director &bull; Vision Critic &bull; Master Polish
                   </p>
                 </div>
               </div>
@@ -1519,9 +1612,9 @@ export function App() {
                     <Layers className="w-4 h-4 text-gray-600" />
                   )}
                 </div>
-                <div className="text-xs font-bold text-gray-100">Draft Edit Plan</div>
+                <div className="text-xs font-bold text-gray-100">Whisper Transcription</div>
                 <p className="text-[10px] text-gray-400 mt-0.5 leading-snug">
-                  Cuts, timing, color & audio sync
+                  Real speech → word timestamps
                 </p>
               </div>
 

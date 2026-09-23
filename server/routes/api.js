@@ -728,28 +728,64 @@ router.post('/generate-subtitles', async (req, res) => {
 });
 
 /**
- * Autonomous 3-Pass AI Director Loop:
- * Pass 1: Draft Edit Plan (gpt-oss-120b)
- * Pass 2: Multimodal Vision Critic Analysis on Keyframes (llama-3.2-11b-vision-preview)
- * Pass 3: Self-Improvement & Master Polishing (gpt-oss-120b)
+ * Autonomous 4-Pass AI Director Pipeline:
+ * Pass 1: Whisper Transcription → real word timestamps from the video
+ * Pass 2: AI Director LLM → edit plan informed by real transcript + silence analysis
+ * Pass 3: Multimodal Vision Critic → VFX/color suggestions from keyframes
+ * Pass 4: Vision-informed refinement → final polished plan with real subtitles
  */
 router.post('/autonomous-director-loop', async (req, res) => {
   try {
     const { prompt = 'Autonomous broadcast edit with viral hook', videoPath, duration = 30, photos = [], audioTrack } = req.body;
     const resolvedVideoPath = resolveMediaFilePath(videoPath);
 
-    // --- PASS 1: Generate Initial High-Fidelity Director Plan ---
+    // --- PASS 1: Whisper Transcription (real words from video) ---
+    let transcript = null;
+    let whisperWords = [];
+    let subtitleSource = 'llm'; // default if no real speech found
+    let audioExtracted = false;
+    let extractedAudioPath = null;
+
+    if (resolvedVideoPath) {
+      try {
+        extractedAudioPath = path.join(uploadDir, `audio_${Date.now()}.wav`);
+        await FFmpegService.extractAudio(resolvedVideoPath, extractedAudioPath);
+        audioExtracted = fs.existsSync(extractedAudioPath);
+      } catch (audioErr) {
+        console.warn('[Director] Audio extraction failed:', audioErr.message);
+      }
+
+      if (audioExtracted) {
+        try {
+          const p = (prompt || '').toLowerCase();
+          const language = (p.includes('hindi') || p.includes('hinglish') || p.includes('devanagari')) ? 'hi' : undefined;
+          transcript = await AIService.transcribeAudio({
+            audioFilePath: extractedAudioPath,
+            language,
+            promptHint: prompt
+          });
+          whisperWords = transcript?.words || [];
+          if (whisperWords.length > 0) subtitleSource = 'whisper';
+          console.log(`[Director] Whisper transcribed ${whisperWords.length} words, ${transcript?.segments?.length || 0} segments`);
+        } catch (whisperErr) {
+          console.warn('[Director] Whisper transcription failed:', whisperErr.message);
+        }
+      }
+    }
+
+    // --- PASS 2: AI Director LLM with real transcript ---
     const draftPlan = await AIService.generateTimelineEdits({
       prompt,
+      transcript: transcript ? { text: transcript.text, segments: transcript.segments } : null,
       duration: duration || 30
     });
 
-    // --- PASS 2: Multimodal Vision Critic Inspection (Optimized Frame Budget) ---
+    // --- PASS 3: Multimodal Vision Critic + VFX Suggestions ---
     let frames = [];
     if (resolvedVideoPath) {
-      frames = await FFmpegService.extractKeyframes(resolvedVideoPath, duration || 12, 2, uploadDir);
+      frames = await FFmpegService.extractKeyframes(resolvedVideoPath, duration || 12, 4, uploadDir);
     } else if (photos && photos.length > 0) {
-      frames = photos.slice(0, 2).map((p, idx) => ({
+      frames = photos.slice(0, 4).map((p, idx) => ({
         timestamp: idx * (duration / Math.max(photos.length, 1)),
         path: resolveMediaFilePath(p.url || p.path) || p.path || p.url,
         url: p.url
@@ -758,26 +794,52 @@ router.post('/autonomous-director-loop', async (req, res) => {
 
     let visionCritique = null;
     let finalPlan = draftPlan;
+    let effectsSource = 'llm';
 
     if (frames.length > 0) {
       visionCritique = await AIService.analyzeVideoVision({
         frames,
-        prompt: `Critique edit for shot composition, lighting consistency, 9:16 framing, color balance, and subtitle readability. Prompt: "${prompt}"`
+        prompt: `Analyze for shot composition, lighting, 9:16 framing, color balance, and suggest specific visual effects. Prompt: "${prompt}"`
       });
 
-      // --- PASS 3: AI Self-Improvement & Master Polish ---
+      // --- PASS 4: Refine plan with vision critique ---
       finalPlan = await AIService.refineEditsWithVisionCritic({
         prompt,
         draftPlan,
         visionAnalysis: visionCritique,
         duration: duration || 30
       });
+
+      // Inject vision-driven effects if plan doesn't have good ones
+      if (visionCritique && (!finalPlan.effects || finalPlan.effects.length === 0)) {
+        finalPlan.effects = AIService.mapVisionToEffects(visionCritique);
+        if (finalPlan.effects.length > 0) effectsSource = 'vision';
+      }
     }
 
-    // Ensure subtitles are populated (either from plan, or draft plan, or heuristic)
-    if (!finalPlan.subtitles || finalPlan.subtitles.length === 0) {
+    // --- SUBTITLE RESOLUTION: Whisper words take priority ---
+    if (whisperWords.length > 0) {
+      // Map real Whisper word timestamps onto the timeline
+      // Clamp words to the actual duration
+      const clampedWords = whisperWords
+        .filter(w => w.start < (duration || 30))
+        .map((w, idx) => ({
+          id: `w-${idx}`,
+          word: w.word,
+          start: parseFloat(w.start.toFixed(3)),
+          end: parseFloat(Math.min(w.end, duration || 30).toFixed(3))
+        }));
+
+      finalPlan.subtitles = clampedWords;
+      subtitleSource = 'whisper';
+
+      // Keep the LLM-chosen subtitle style but ensure font supports Hindi if needed
+      if (!finalPlan.subtitleStyle) finalPlan.subtitleStyle = draftPlan.subtitleStyle;
+    } else if (!finalPlan.subtitles || finalPlan.subtitles.length === 0) {
+      // No real speech: fallback to LLM-generated thematic captions
       if (draftPlan.subtitles && draftPlan.subtitles.length > 0) {
         finalPlan.subtitles = draftPlan.subtitles;
+        subtitleSource = 'llm';
       } else {
         const generatedSubs = await AIService.generateSubtitlesFromPrompt({
           prompt,
@@ -786,7 +848,13 @@ router.post('/autonomous-director-loop', async (req, res) => {
         });
         finalPlan.subtitles = generatedSubs.words;
         if (!finalPlan.subtitleStyle) finalPlan.subtitleStyle = generatedSubs.subtitleStyle;
+        subtitleSource = generatedSubs.subtitleSource || 'llm';
       }
+    }
+
+    // Cleanup extracted audio file
+    if (extractedAudioPath && fs.existsSync(extractedAudioPath)) {
+      try { fs.unlinkSync(extractedAudioPath); } catch (_) {}
     }
 
     const modelUsed = finalPlan._modelUsed || draftPlan._modelUsed || 'AI Director';
@@ -796,15 +864,73 @@ router.post('/autonomous-director-loop', async (req, res) => {
       success: true,
       modelUsed,
       fallbackTriggered,
+      subtitleSource,
+      effectsSource,
       genreDetected: finalPlan.genreDetected || draftPlan.genreDetected || 'General Edit',
       draftPlan,
       frames,
       visionCritique,
       finalPlan,
-      improvements: finalPlan.improvements || []
+      improvements: finalPlan.improvements || [],
+      transcriptSummary: transcript ? {
+        wordCount: whisperWords.length,
+        duration: transcript.duration,
+        textPreview: (transcript.text || '').slice(0, 200)
+      } : null
     });
   } catch (err) {
     console.error('Autonomous director loop error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+/**
+ * Export Render: Converts AI edit plan into a real downloadable MP4 video.
+ * Uses FFmpeg to apply cuts, subtitle burn-in, color grading, VFX, and audio mixing.
+ */
+router.post('/render-export', async (req, res) => {
+  try {
+    const { videoPath, plan, audioTrackPath, resolution = '1080p', aspectRatio = '9:16' } = req.body;
+
+    if (!plan) {
+      return res.status(400).json({ error: 'A finalPlan is required to render video.' });
+    }
+
+    const resolvedVideoPath = resolveMediaFilePath(videoPath);
+    if (!resolvedVideoPath) {
+      return res.status(400).json({ error: 'videoPath is required and must point to an uploaded file.' });
+    }
+
+    const resolvedAudio = audioTrackPath ? resolveMediaFilePath(audioTrackPath) : null;
+    const outputFileName = `export_${Date.now()}.mp4`;
+    const outputPath = path.join(outputDir, outputFileName);
+
+    console.log(`[Export] Rendering: ${outputFileName} | cuts: ${(plan.cuts || []).length} | subs: ${(plan.subtitles || []).length}`);
+
+    const result = await FFmpegService.renderFromPlan({
+      inputVideoPath: resolvedVideoPath,
+      outputVideoPath: outputPath,
+      plan,
+      audioTrackPath: resolvedAudio,
+      resolution,
+      aspectRatio: plan.aspectRatio || aspectRatio,
+      onProgress: (p) => {
+        // Progress is available but not streamed (polling-based approach)
+        console.log(`[Export] Progress: ${p.currentTime?.toFixed(1)}s`);
+      }
+    });
+
+    const outputUrl = `/outputs/${outputFileName}`;
+    res.json({
+      success: true,
+      outputUrl,
+      resolution: result.resolution,
+      sizeBytes: result.sizeBytes,
+      sizeMB: ((result.sizeBytes || 0) / 1024 / 1024).toFixed(2)
+    });
+  } catch (err) {
+    console.error('[Export] Render failed:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

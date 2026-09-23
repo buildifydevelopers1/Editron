@@ -396,6 +396,8 @@ export interface AutonomousDirectorResult {
   success: boolean;
   modelUsed?: string;
   fallbackTriggered?: boolean;
+  subtitleSource?: 'whisper' | 'llm' | 'fallback';
+  effectsSource?: 'vision' | 'llm' | 'none';
   genreDetected?: string;
   draftPlan: any;
   frames: { timestamp: number; path: string; url: string }[];
@@ -410,6 +412,11 @@ export interface AutonomousDirectorResult {
   };
   finalPlan: any;
   improvements: string[];
+  transcriptSummary?: {
+    wordCount: number;
+    duration: number;
+    textPreview: string;
+  } | null;
 }
 
 export async function requestAutonomousDirectorLoop({
@@ -437,4 +444,39 @@ export async function requestAutonomousDirectorLoop({
   }
   return data;
 }
+
+export interface RenderExportResult {
+  success: boolean;
+  outputUrl: string;
+  resolution: string;
+  sizeBytes: number;
+  sizeMB: string;
+}
+
+export async function renderExport({
+  videoPath,
+  plan,
+  audioTrackPath,
+  resolution = '1080p',
+  aspectRatio = '9:16',
+}: {
+  videoPath: string;
+  plan: any;
+  audioTrackPath?: string | null;
+  resolution?: string;
+  aspectRatio?: string;
+}): Promise<RenderExportResult> {
+  const res = await fetch(`${API_BASE}/render-export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ videoPath, plan, audioTrackPath, resolution, aspectRatio }),
+  });
+
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error || 'Export render failed');
+  }
+  return data;
+}
+
 

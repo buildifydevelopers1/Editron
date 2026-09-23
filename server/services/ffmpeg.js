@@ -544,5 +544,236 @@ export class FFmpegService {
       description: `Auto-extracted ${targetDuration}s viral peak chorus from ${formatTs(bestStart)} to ${formatTs(hookEnd)} of original ${formatTs(originalDuration)} track.`
     };
   }
+
+  /**
+   * Build an ASS subtitle file from timed subtitle words for FFmpeg burn-in.
+   */
+  static buildAssSubtitleFile(subtitleWords = [], subtitleStyle = {}, outputPath) {
+    const fontSize = subtitleStyle.fontSize || 40;
+    const strokeWidth = subtitleStyle.strokeWidth || 4;
+    const fontFamily = (subtitleStyle.fontFamily || 'Montserrat').split(',')[0].replace(/'/g, '').trim();
+    const positionY = subtitleStyle.positionY || 20;
+    const textCase = subtitleStyle.textCase || 'uppercase';
+    const marginV = Math.round(1080 * positionY / 100);
+
+    const assHeader = [
+      '[Script Info]',
+      'ScriptType: v4.00+',
+      'PlayResX: 1920',
+      'PlayResY: 1080',
+      'ScaledBorderAndShadow: yes',
+      '',
+      '[V4+ Styles]',
+      'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+      `Style: Default,${fontFamily},${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${strokeWidth},0,2,10,10,${marginV},1`,
+      '',
+      '[Events]',
+      'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+      ''
+    ].join('\n');
+
+    const toAssTime = (sec) => {
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = Math.floor(sec % 60);
+      const cs = Math.round((sec % 1) * 100);
+      return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(2,'0')}`;
+    };
+
+    // Group words into natural reading phrases
+    const phrases = [];
+    let group = [];
+    for (let i = 0; i < subtitleWords.length; i++) {
+      const w = subtitleWords[i];
+      const prev = group[group.length - 1];
+      const hasPause = prev && (w.start - prev.end > 0.5);
+      const tooLong = group.length >= 4;
+      const durationTooLong = group.length > 0 && (w.end - group[0].start > 2.5);
+      if (group.length > 0 && (hasPause || tooLong || durationTooLong)) {
+        phrases.push(group);
+        group = [w];
+      } else {
+        group.push(w);
+      }
+    }
+    if (group.length > 0) phrases.push(group);
+
+    let events = '';
+    for (const phrase of phrases) {
+      const text = phrase.map(w => textCase === 'uppercase' ? w.word.toUpperCase() : w.word).join(' ');
+      const start = phrase[0].start;
+      const end = phrase[phrase.length - 1].end + 0.3;
+      events += `Dialogue: 0,${toAssTime(start)},${toAssTime(end)},Default,,0,0,0,,${text}\n`;
+    }
+
+    fs.writeFileSync(outputPath, assHeader + events, 'utf8');
+    return outputPath;
+  }
+
+  /**
+   * Render a real output video from an AI edit plan.
+   * Handles multi-cut trim+concat, subtitle burn-in (.ass), color grading, VFX, and audio mixing.
+   */
+  static async renderFromPlan({
+    inputVideoPath,
+    outputVideoPath,
+    plan = {},
+    audioTrackPath = null,
+    resolution = '1080p',
+    aspectRatio = '9:16',
+    onProgress = () => {}
+  }) {
+    return new Promise(async (resolve, reject) => {
+      // Target dimensions
+      let targetW = 1080, targetH = 1920;
+      if (aspectRatio === '16:9') { targetW = 1920; targetH = 1080; }
+      else if (aspectRatio === '1:1') { targetW = 1080; targetH = 1080; }
+      else if (aspectRatio === '2.39:1') { targetW = 1920; targetH = 804; }
+      else if (aspectRatio === '4:5') { targetW = 1080; targetH = 1350; }
+      if (resolution === '720p') { targetW = Math.round(targetW * 0.667); targetH = Math.round(targetH * 0.667); }
+      targetW = Math.floor(targetW / 2) * 2;
+      targetH = Math.floor(targetH / 2) * 2;
+
+      const workDir = path.dirname(outputVideoPath);
+      const cuts = plan.cuts || [];
+      const colorGrading = plan.colorGrading || {};
+      const subtitleWords = plan.subtitles || [];
+      const subtitleStyle = plan.subtitleStyle || {};
+      const effects = plan.effects || [];
+
+      if (!inputVideoPath || !fs.existsSync(inputVideoPath)) {
+        return reject(new Error('Input video not found for rendering'));
+      }
+
+      // Color grading
+      const contrast = ((colorGrading.contrast !== undefined ? colorGrading.contrast / 100 : 0) + 1.0).toFixed(3);
+      const saturation = ((colorGrading.saturation !== undefined ? colorGrading.saturation / 100 : 0) + 1.0).toFixed(3);
+      const brightness = (colorGrading.brightness !== undefined ? colorGrading.brightness / 100 : 0.0).toFixed(3);
+      const temp = colorGrading.temperature || 0;
+      const tint = colorGrading.tint || 0;
+      const rr = (1.0 + (temp > 0 ? temp / 200 : 0)).toFixed(3);
+      const bb = (1.0 + (temp < 0 ? -temp / 200 : 0)).toFixed(3);
+      const gg = (1.0 + (tint > 0 ? tint / 300 : 0)).toFixed(3);
+
+      // VFX filter parts
+      const vfxParts = [];
+      const hasGrain = effects.find(e => e.type === 'film_grain' && e.enabled);
+      const hasVignette = effects.find(e => e.type === 'vignette' && e.enabled);
+      const hasGlow = effects.find(e => e.type === 'glow' && e.enabled);
+      if (hasGrain) vfxParts.push(`noise=alls=${Math.round((hasGrain.intensity || 30) / 2)}:allf=t+u`);
+      if (hasVignette) vfxParts.push('vignette=PI/4');
+      if (hasGlow) vfxParts.push('unsharp=5:5:1.2:5:5:0.0');
+
+      // Build subtitle file
+      let assSubtitlePath = null;
+      if (subtitleWords.length > 0) {
+        assSubtitlePath = path.join(workDir, `subs_${Date.now()}.ass`);
+        this.buildAssSubtitleFile(subtitleWords, subtitleStyle, assSubtitlePath);
+      }
+
+      // Core video filter chain
+      const baseVfParts = [
+        `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease`,
+        `pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:color=black`,
+        `eq=contrast=${contrast}:saturation=${saturation}:brightness=${brightness}`,
+        `colorchannelmixer=rr=${rr}:gg=${gg}:bb=${bb}`,
+        ...vfxParts
+      ];
+      const baseVf = baseVfParts.join(',');
+      const safeSubs = assSubtitlePath
+        ? assSubtitlePath.replace(/\\/g, '/').replace(/:/g, '\\:')
+        : null;
+      const subChain = safeSubs ? `,subtitles='${safeSubs}'` : '';
+
+      const hasSecondaryAudio = audioTrackPath && fs.existsSync(audioTrackPath);
+      const args = ['-y', '-i', inputVideoPath];
+      if (hasSecondaryAudio) args.push('-i', audioTrackPath);
+
+      if (cuts.length > 1) {
+        // Multi-cut: trim each segment then concat
+        const vSegs = cuts.map((c, i) =>
+          `[0:v]trim=start=${c.start.toFixed(3)}:end=${c.end.toFixed(3)},setpts=PTS-STARTPTS[v${i}]`
+        );
+        const aSegs = cuts.map((c, i) =>
+          `[0:a]atrim=start=${c.start.toFixed(3)}:end=${c.end.toFixed(3)},asetpts=PTS-STARTPTS[a${i}]`
+        );
+        const vJoin = cuts.map((_, i) => `[v${i}]`).join('');
+        const aJoin = cuts.map((_, i) => `[a${i}]`).join('');
+
+        let fc;
+        if (hasSecondaryAudio) {
+          fc = [
+            ...vSegs, ...aSegs,
+            `${vJoin}concat=n=${cuts.length}:v=1:a=0[concatv]`,
+            `${aJoin}concat=n=${cuts.length}:v=0:a=1[concata]`,
+            `[concatv]${baseVf}${subChain}[outv]`,
+            `[concata]volume=0.2[va]`,
+            `[1:a]volume=0.9[bgm]`,
+            `[va][bgm]amix=inputs=2:duration=first:dropout_transition=2[outa]`
+          ].join(';');
+          args.push('-filter_complex', fc, '-map', '[outv]', '-map', '[outa]');
+        } else {
+          fc = [
+            ...vSegs, ...aSegs,
+            `${vJoin}concat=n=${cuts.length}:v=1:a=0[concatv]`,
+            `${aJoin}concat=n=${cuts.length}:v=0:a=1[concata]`,
+            `[concatv]${baseVf}${subChain}[outv]`
+          ].join(';');
+          args.push('-filter_complex', fc, '-map', '[outv]', '-map', '[concata]');
+        }
+      } else {
+        // Single pass
+        if (hasSecondaryAudio) {
+          const fc = [
+            `[0:v]${baseVf}${subChain}[outv]`,
+            `[0:a]volume=0.2[va]`,
+            `[1:a]volume=0.9[bgm]`,
+            `[va][bgm]amix=inputs=2:duration=first:dropout_transition=2[outa]`
+          ].join(';');
+          args.push('-filter_complex', fc, '-map', '[outv]', '-map', '[outa]');
+        } else {
+          args.push('-vf', `${baseVf}${subChain}`);
+        }
+      }
+
+      // Encoding flags
+      args.push(
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+        '-preset', 'fast', '-crf', '20',
+        '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
+        '-movflags', '+faststart',
+        outputVideoPath
+      );
+
+      const proc = spawn('ffmpeg', args);
+      let stderrData = '';
+
+      proc.stderr.on('data', (data) => {
+        const text = data.toString();
+        stderrData += text;
+        const m = text.match(/time=(\d{2}):(\d{2}):(\d{2}\.\d{2})/);
+        if (m) onProgress({ currentTime: parseFloat(m[1]) * 3600 + parseFloat(m[2]) * 60 + parseFloat(m[3]) });
+      });
+
+      proc.on('close', (code) => {
+        if (assSubtitlePath && fs.existsSync(assSubtitlePath)) {
+          try { fs.unlinkSync(assSubtitlePath); } catch (_) {}
+        }
+        if (code === 0) {
+          const stat = fs.existsSync(outputVideoPath) ? fs.statSync(outputVideoPath) : null;
+          resolve({
+            success: true,
+            outputPath: outputVideoPath,
+            resolution: `${targetW}x${targetH}`,
+            sizeBytes: stat ? stat.size : 0
+          });
+        } else {
+          reject(new Error(`FFmpeg render failed (exit ${code}): ${stderrData.slice(-800)}`));
+        }
+      });
+
+      proc.on('error', (err) => reject(err));
+    });
+  }
 }
 

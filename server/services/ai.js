@@ -346,6 +346,57 @@ Output ONLY a JSON object with this EXACT structure:
   }
 
   /**
+   * Map vision LLM analysis into concrete VideoEffect objects for the editor/exporter.
+   * Uses emotional tone, lighting quality, and shot type to pick appropriate effects.
+   */
+  static mapVisionToEffects(visionAnalysis = {}) {
+    const effects = [];
+    const tone = (visionAnalysis.emotionalTone || '').toLowerCase();
+    const lighting = (visionAnalysis.lightingQuality || '').toLowerCase();
+    const shot = (visionAnalysis.shotType || '').toLowerCase();
+
+    // Always add subtle vignette for cinematic look
+    effects.push({ id: 'fx-vignette', type: 'vignette', name: 'Vignette', enabled: true, intensity: 35 });
+
+    // Film grain for cinematic/dramatic tones
+    if (tone.includes('cinematic') || tone.includes('dramatic') || tone.includes('moody') || tone.includes('confident')) {
+      effects.push({ id: 'fx-grain', type: 'film_grain', name: 'Film Grain', enabled: true, intensity: 25 });
+    }
+
+    // Camera shake for energetic/action content
+    if (tone.includes('energetic') || tone.includes('dynamic') || tone.includes('action') || tone.includes('intense')) {
+      effects.push({ id: 'fx-shake', type: 'camera_shake', name: 'Camera Shake', enabled: true, intensity: 30 });
+    }
+
+    // Glow for warm/uplifting/motivational content
+    if (tone.includes('uplifting') || tone.includes('inspiring') || tone.includes('warm') || lighting.includes('warm')) {
+      effects.push({ id: 'fx-glow', type: 'glow', name: 'Glow', enabled: true, intensity: 40 });
+    }
+
+    // VHS scanlines for retro/nostalgic content
+    if (tone.includes('nostalgic') || tone.includes('retro') || shot.includes('wide') || lighting.includes('low light')) {
+      effects.push({ id: 'fx-vhs', type: 'vhs_scanlines', name: 'VHS Scanlines', enabled: true, intensity: 20 });
+    }
+
+    // RGB split for high-energy/hype/drill content
+    if (tone.includes('hype') || tone.includes('drill') || tone.includes('aggressive')) {
+      effects.push({ id: 'fx-rgb', type: 'rgb_split', name: 'RGB Split', enabled: true, intensity: 25 });
+    }
+
+    // Anamorphic streak for wide/cinematic shots
+    if (shot.includes('wide') || shot.includes('cinematic') || shot.includes('anamorphic')) {
+      effects.push({ id: 'fx-streak', type: 'anamorphic_streak', name: 'Anamorphic Streak', enabled: true, intensity: 30 });
+    }
+
+    // Cinematic letterbox for dramatic/interview content
+    if (shot.includes('talking head') || shot.includes('interview') || tone.includes('documentary')) {
+      effects.push({ id: 'fx-letterbox', type: 'cinematic_letterbox', name: 'Cinematic Letterbox', enabled: false, intensity: 100 });
+    }
+
+    return effects;
+  }
+
+  /**
    * High-accuracy heuristic edit generator for instant offline/demo testing
    */
   static generateHeuristicEdits(prompt, transcript, duration = 30) {
@@ -1011,7 +1062,10 @@ Generate synchronized word subtitles for this sequence.`;
             temperature: 0.3
           });
           const raw = response.choices[0]?.message?.content || '{}';
-          return JSON.parse(raw);
+          console.log('[AI Engine] Subtitle LLM raw response:', raw);
+          const parsed = JSON.parse(raw);
+          parsed.subtitleSource = 'llm';
+          return parsed;
         },
         llmModel
       );
